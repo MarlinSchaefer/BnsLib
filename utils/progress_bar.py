@@ -116,14 +116,11 @@ class mp_progress_tracker(progress_tracker):
         The number of steps that are already completed.
     """
     def __init__(self, num_of_steps, name='Progress', steps_taken=0):
-        #super().__init__(num_of_steps, name=name,
-                         #steps_taken=steps_taken)
-        self.t_start = datetime.now()
-        self.num_of_steps = num_of_steps
-        self.name = name
-        self.steps_taken = mp.Value('i', steps_taken)
         self._printed_header_val = mp.Value('i', False)
         self.last_string_length_val = mp.Value('i', 0)
+        super().__init__(num_of_steps, name=name,
+                         steps_taken=steps_taken)
+        self.steps_taken = mp.Value('i', steps_taken)
     
     @property
     def _printed_header(self):
