@@ -21,6 +21,39 @@ class DictList(object):
     def __getitem__(self, key):
         return self.dic[key]
     
+    def __contains__(self, key):
+        return key in self.dic
+    
+    def __len__(self):
+        return len(self.dic)
+    
+    def __add__(self, other):
+        ret = self.copy()
+        return ret.join(other)
+    
+    def __radd__(self, other):
+        if isinstance(other, dict):
+            tmp = DictList(dic=other)
+        else:
+            tmp = other
+        if not isinstance(tmp, type(self)):
+            msg = 'Can only add dict or DictList to a DictList. '
+            msg += 'Got type {} instead.'.format(type(other))
+            raise TypeError(msg)
+        ret = tmp.copy()
+        return ret.join(self)
+        
+    def copy(self):
+        return DictList(dic=self.dic.copy())
+    
+    def get(self, k, d=None):
+        #Not sure if this implementation is correct. Does this allow for
+        #setdefault to work?
+        return self.dic.get(k, d)
+    
+    def pop(self, k, *d):
+        return self.dic.pop(k, *d)
+    
     @property
     def dic(self):
         return self._dic
@@ -80,6 +113,80 @@ class DictList(object):
     
     def keys(self):
         return self.dic.keys()
+    
+    def values(self):
+        return self.dic.values()
+    
+    def items(self):
+        return self.dic.items()
+    
+    def extend(key, value=None):
+        if isinstance(key, (dict, type(self))):
+            for k, val in key.items():
+                if k in self.dic:
+                    self.dic[k].extend(val)
+                else:
+                    self.append(k, value=val)
+        else:
+            if key in self:
+                if value is None:
+                    return
+                else:
+                    self.dic[key].extend(value)
+            else:
+                self.append(key, value=value)
+    
+    def join(self, other):
+        if isinstance(other, dict):
+            to_join = DictList(other)
+        else:
+            to_join = other
+        if not isinstance(to_join, type(self)):
+            msg = 'Can only join a dictionary or DictList to a DictList.'
+            msg += ' Got instance of type {} instead.'
+            msg = msg.format(type(to_join))
+            raise TypeError(msg)
+        for okey, ovalue in to_join.items():
+            if okey in self:
+                self.dic[okey] = self.dic[okey] + to_join[okey]
+            else:
+                self.append(okey, value=to_join[okey])
+    
+    def count(self, item, keys=None):
+        """Return the number of occurences of item in the DictList.
+        
+        Arguments
+        ---------
+        item : object
+            The value to search for.
+        keys : {iterable of keys or 'all' or None, None}
+            Which dictionary entries to consider. If set to None, all
+            keys will be considered but only the sum of all the
+            individual counts will be returned. If set to 'all', all
+            keys will be considered and a dictionary with {key: count}
+            will be returned. This dictionary specifies the counts for
+            each individual entry. If an iterable of keys is provided
+            a dictionary with the keys and the according counts is
+            returned.
+        
+        Returns
+        -------
+        ret : int or dict
+            Either an integer specifying the count over all keys or a
+            dictionary, where the count for each key is given
+            explicitly.
+        """
+        if keys is None:
+            return sum([val.count(item) for val in self.values()])
+        if isinstance(keys, str) and keys.lower() == 'all':
+            keys = list(self.keys())
+        ret = {}
+        for key in keys:
+            if key in self:
+                ret[key] = self[key].count(item)
+            else:
+                ret[key] = 0
+        return ret
 
 class MPCounter(object):
     def __init__(self, val=0):
