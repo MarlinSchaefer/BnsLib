@@ -1,9 +1,58 @@
+#from multiprocessing import set_start_method
+#set_start_method('spawn')
 import numpy as np
 from pycbc.waveform import get_td_waveform, get_fd_waveform
 from BnsLib.utils.formatting import input_to_list, list_length
 from functools import wraps
 from pycbc.detector import Detector
 import warnings
+from BnsLib.utils.progress_bar import progress_tracker, mp_progress_tracker
+from BnsLib.types.utils import DictList, MPCounter
+import multiprocessing as mp
+from pycbc.types import TimeSeries
+import datetime
+
+def multi_wave_worker(idx, wave_params, projection_params,
+                      detector_names, transform, domain, progbar,
+                      output):
+    if detector_names is None:
+        detectors = None
+    else:
+        detectors = [Detector(det) for det in detector_names]
+    ret = DictList()
+    for wav_params, proj_params in zip(wave_params, projection_params):
+        ret.append(signal_worker(wav_params,
+                                 proj_params,
+                                 detectors,
+                                 transform,
+                                 domain=domain))
+        if progbar is not None:
+            progbar.iterate()
+    output.put((idx, ret.as_dict))
+
+def signal_worker(wave_params, projection_params, detectors, transform,
+                  domain='time'):
+    if domain.lower() == 'time':
+        hp, hc = get_td_waveform(**wave_params)
+    elif domain.lower() == 'frequency':
+        hp, hc = get_fd_waveform(**wave_params)
+    else:
+        msg = 'Domain must be either "time" or "frequency".'
+        raise ValueError(msg)
+    
+    if not isinstance(detectors, list):
+        detectors = [detectors]
+    ret = {}
+    if detectors is None:
+        ret['plus'] = hp
+        ret['cross'] = hc
+    else:
+        st = float(hp.start_time)
+        projection_params.append(st)
+        for det in detectors:
+            fp, fc = det.antenna_pattern(*projection_params)
+            ret[det.name] = transform(fp * hp + fc * hc)
+    return ret
 
 class WaveformGetter(object):
     def __init__(self, variable_params=None, static_params=None,
@@ -42,6 +91,9 @@ class WaveformGetter(object):
     
     def generate(self, index=None, single_detector_as_list=True):
         """Generates one or multiple waveforms.
+        
+        TODO:
+        -Maybe merge this with generate_mp
         
         Arguments
         ---------
@@ -171,6 +223,105 @@ class WaveformGetter(object):
                                                  st)
                     h = fp * hp + fc * hc
                     ret[det.name].append(self.transform(h))
+        
+        if was_int:
+            ret = {key: val[0] for (key, val) in ret.items()}
+        
+        if self.detectors is None:
+            return ret
+        
+        if single_detector_as_list and len(self.detectors) == 1:
+            return ret[self.detectors[0].name]
+        return ret
+    
+    def generate_mp(self, index=None, single_detector_as_list=True,
+                workers=None, verbose=True):
+        if index is None:
+            index = slice(None, None)
+        was_int = False
+        if isinstance(index, int):
+            index = slice(index, index+1)
+            was_int = True
+        
+        if workers is None:
+            workers = mp.cpu_count()
+        if workers == 0:
+            return self.generate(single_detector_as_list=single_detector_as_list)
+        
+        indices = list(range(*index.indices(len(self))))
+        
+        #create input to signal worker
+        wave_params = []
+        projection_params = []
+        for i in indices:
+            params = self.get_params(i)
+            wave_params.append(params)
+            if self.detectors is None:
+                projection_params.append([])
+            else:
+                if 'ra' in params:
+                    ra_key = 'ra'
+                if 'right_ascension' in params:
+                    ra_key = 'right_ascension'
+                if 'dec' in params:
+                    dec_key = 'dec'
+                if 'declination' in params:
+                    dec_key = 'declination'
+                if 'pol' in params:
+                    pol_key = 'pol'
+                if 'polarization' in params:
+                    pol_key = 'polarization'
+                projection_params.append([params[key] for key in [ra_key, dec_key, pol_key]])
+        
+        if self.detectors is None:
+            detector_names = None
+        else:
+            detector_names = [det.name for det in self.detectors]
+        
+        #Generate the signals
+        waves_per_process = [len(indices) // workers] * workers
+        if sum(waves_per_process) < len(indices):
+            for i in range(len(indices) - sum(waves_per_process)):
+                waves_per_process[i] += 1
+        waves_per_process = np.cumsum(waves_per_process)
+        wpp = [0]
+        wpp.extend(waves_per_process)
+        
+        wave_boundaries = [slice(wpp[i], wpp[i+1]) for i in range(workers)]
+        wb = wave_boundaries
+        
+        bar = None
+        if verbose:
+            bar = mp_progress_tracker(len(indices),
+                                      name='Generating waveforms')
+        
+        jobs = []
+        output = mp.Queue()
+        for i in range(workers):
+            p = mp.Process(target=multi_wave_worker,
+                           args=(i,
+                                 wave_params[wb[i]],
+                                 projection_params[wb[i]],
+                                 detector_names,
+                                 self.transform,
+                                 self.domain,
+                                 bar,
+                                 output))
+            jobs.append(p)
+        
+        for p in jobs:
+            p.start()
+        
+        results = [output.get() for p in jobs]
+        
+        for p in jobs:
+            p.join()
+        
+        results.sort()
+        ret = DictList()
+        for pt in results:
+            ret.append(pt)
+        ret = ret.as_dict()
         
         if was_int:
             ret = {key: val[0] for (key, val) in ret.items()}
@@ -332,6 +483,9 @@ class WFParamGenerator(object):
 
     def draw(self):
         return apply_transforms(self.pval.rvs(), self.trans)
+    
+    def draw_multiple(self, num):
+        return apply_transforms(self.pval.rvs(size=num), self.trans)
     
     def draw_full(self):
         var_draws = apply_transforms(self.pval.rvs(), self.trans)
