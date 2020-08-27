@@ -1,5 +1,3 @@
-#from multiprocessing import set_start_method
-#set_start_method('spawn')
 import numpy as np
 from pycbc.waveform import get_td_waveform, get_fd_waveform
 from BnsLib.utils.formatting import input_to_list, list_length
@@ -15,6 +13,50 @@ import datetime
 def multi_wave_worker(idx, wave_params, projection_params,
                       detector_names, transform, domain, progbar,
                       output):
+    """A helper-function to generate multiple waveforms using
+    multiprocessing.
+    
+    Arguments
+    ---------
+    idx : int
+        The index given to the process. This is returned as the first
+        part of the output to identify which parameters the waveforms
+        belong to.
+    wave_params : list of dict
+        A list containing the keyword-arguments for each waveform that
+        should be generated. Each entry of the list is passed to
+        get_td/fd_waveform using unwrapping of a dictionary.
+    projection_params : list of list
+        A list containing all the positional arguments to project the
+        waveform onto the detector. Each entry should contain the
+        following information in order:
+        ['ra', 'dec', 'pol']
+        Can be empty, if detector_names is set to None.
+    detector_names : list of str or None
+        A list of detectors names onto which the waveforms should be
+        projected. Each entry has to be understood by
+        pycbc.detector.Detector. If set to None the waveforms will not
+        be projected and the two polarizations will be returned instead.
+    transform : function
+        A transformation function that should be applied to every
+        waveform. (Can be the identity.)
+    domain : 'time' or 'frequency'
+        Whether to return the waveforms in the time- or
+        frequency-domain.
+    progbar : BnsLib.utils.progress_bar.mp_progress_tracker or None
+        If a progress bar is desired, the instance can be passed here.
+        When set to None, no progress will be reported.
+    output : multiprocessing.Queue
+        The Queue into which the outputs of the waveform generating code
+        will be inserted. Contents are of the form:
+        (index, data)
+        Here `data` is a dictionary. The keys are the different detector
+        names and the values are lists storing the generated waveforms.
+    
+    Returns
+    -------
+    None (see argument `output` for details)
+    """
     if detector_names is None:
         detectors = None
     else:
@@ -469,29 +511,118 @@ from pycbc.distributions import read_constraints_from_config
 from pycbc.distributions import JointDistribution
 from pycbc.transforms import read_transforms_from_config, apply_transforms
 class WFParamGenerator(object):
+    """A class that takes in a configuration file and creates parameters
+    from the described distributions.
+    
+    Arguments
+    ---------
+    config_file : str
+        Path to the config-file that should be used.
+    seed : {int, 0}
+        Which seed should be used for the parameter-generation.
+    
+    Attributes
+    ----------
+    var_args : list of str
+        A list containing the names of the variable arguments.
+    static : dict
+        A dictionary containing the static parameters. The keys are the
+        names of the static parameters, whereas the according values are
+        the values of the parameters.
+    trans : list of pycbc.Transformation
+        A list of transformations that are applied to the variable
+        arguments.
+    pval : pycbc.JointDistribution
+        The joint distribution of the variable arguments. Parameters are
+        drawn from this distribution and transformed according to the
+        transformations.
+    """
     def __init__(self, config_file, seed=0):
         np.random.seed(seed)
         config_file = input_to_list(config_file)
         config_file = WorkflowConfigParser(config_file, None)
-        var_args, self.static = read_params_from_config(config_file)
+        self.var_args, self.static = read_params_from_config(config_file)
         constraints = read_constraints_from_config(config_file)
         dist = read_distributions_from_config(config_file)
 
         self.trans = read_transforms_from_config(config_file)
-        self.pval = JointDistribution(var_args, *dist, 
+        self.pval = JointDistribution(self.var_args, *dist, 
                                 **{"constraints": constraints})   
-
+    
+    def __contains__(self, name):
+        """Returns true if the given name is a parameter name known to
+        the generator.
+        
+        Arguments
+        ---------
+        name : str
+            The name to search for.
+        
+        Returns
+        -------
+        bool:
+            True if the name is either in the static parameters, the
+            variable arguments or any of the transform outputs.
+        """
+        in_params = (name in self.var_args) or (name in self.static)
+        in_trans = any([(name in trans.input) or (name in trans.output) for trans in self.trans])
+        return in_params or in_trans
+    
     def draw(self):
+        """Draw a single set of parameters.
+        
+        Arguments
+        ---------
+        None
+        
+        Returns
+        -------
+        pycbc.io.record.FieldArray:
+        A field array, where each column consists of a numpy array with
+        a single entry.
+        """
         return apply_transforms(self.pval.rvs(), self.trans)
     
     def draw_multiple(self, num):
+        """Draw multiple parameters at once. This approach is preferable
+        over calling draw multiple times.
+        
+        Arguments
+        ---------
+        num : int
+            The number of parameters to draw from the distribution.
+        
+        Returns
+        -------
+        pycbc.io.record.FieldArray:
+        A field array, where each column consists of a numpy array with
+        n entries. (n as specified by `num`)
+        """
         return apply_transforms(self.pval.rvs(size=num), self.trans)
     
-    def draw_full(self):
-        var_draws = apply_transforms(self.pval.rvs(), self.trans)
-        ret = self.static.copy()
-        ret.update(dict(var_draws))
-        return ret
+    def keys(self):
+        """Returns the list of keys to the output.
+        
+        Arguments
+        ---------
+        None
+        
+        Returns
+        -------
+        list of str:
+            The list of keys as they are known for the output.
+        """
+        params_keys = set(self.var_args)
+        static_keys = set(self.static.keys())
+        trans_input = set()
+        trans_output = set()
+        for trans in self.trans:
+            trans_input = trans_input.union(trans.input)
+            trans_output = trans_output.union(trans.output)
+        ret = params_keys.union(static_keys)
+        ret = ret.difference(trans_input)
+        ret = ret.union(trans_output)
+        return list(ret)
 
 class WaveformGenerator(WaveformGetter):
     def __init__(self, config_file, seed=0, domain='time',
