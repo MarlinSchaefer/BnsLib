@@ -70,7 +70,7 @@ def multi_wave_worker(idx, wave_params, projection_params,
                                  domain=domain))
         if progbar is not None:
             progbar.iterate()
-    output.put((idx, ret.as_dict))
+    output.put((idx, ret.as_dict()))
 
 def signal_worker(wave_params, projection_params, detectors, transform,
                   domain='time'):
@@ -362,7 +362,7 @@ class WaveformGetter(object):
         results.sort()
         ret = DictList()
         for pt in results:
-            ret.append(pt)
+            ret.extend(pt[1])
         ret = ret.as_dict()
         
         if was_int:
