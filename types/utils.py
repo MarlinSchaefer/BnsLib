@@ -93,6 +93,7 @@ class DictList(object):
         -------
         None
         """
+        #print(f"Appending key of type {type(key)} in DictList")
         if isinstance(key, dict):
             for k, val in key.items():
                 if k in self.dic:
@@ -120,7 +121,7 @@ class DictList(object):
     def items(self):
         return self.dic.items()
     
-    def extend(key, value=None):
+    def extend(self, key, value=None):
         if isinstance(key, (dict, type(self))):
             for k, val in key.items():
                 if k in self.dic:
@@ -187,6 +188,63 @@ class DictList(object):
             else:
                 ret[key] = 0
         return ret
+
+class NamedPSDCache(object):
+    def __init__(self, psd_names=None):
+        from BnsLib.utils.formatting import input_to_list
+        from pycbc.psd import from_string
+        if psd_names is None:
+            self.psd_cache = {}
+        else:
+            self.psd_cache = {key: {} for key in input_to_list(psd_names)}
+    
+    def get(self, length, delta_f, low_freq_cutoff, psd_name=None):
+        if psd_name is None:
+            if len(self.psd_cache) > 1:
+                msg = 'A PSD-name must be provided when {} stores more '
+                msg += 'than one type of PSD.'
+                msg = msg.format(self.__class__.__name__)
+                raise ValueError(msg)
+            else:
+                psd_name = list(self.psd_cache.keys())[0]
+            
+            ident = (length, delta_f, low_freq_cutoff)
+            if psd_name not in self.psd_cache:
+                self.psd_cache[psd_name] = {}
+            
+            curr_cache = self.psd_cache[psd_name]
+            if ident in curr_cache:
+                return curr_cache[ident]
+            else:
+                psd = from_string(psd_name, *ident)
+                self.psd_cache[psd_name][ident] = psd
+                return psd
+    
+    def get_from_timeseries(self, timeseries, low_freq_cutoff,
+                            psd_name=None):
+        from pycbc.types import TimeSeries
+        if not isinstance(timeseries, TimeSeries):
+            msg = 'Input must be a pycbc.types.TimeSeries. Got type {} '
+            msg += 'instead.'
+            msg = msg.format(type(timeseries))
+            raise TypeError(msg)
+        length = len(timeseries) // 2 + 1
+        delta_f = timeseries.delta_f
+        return self.get(length, delta_f, low_freq_cutoff,
+                        psd_name=psd_name)
+    
+    def get_from_frequencyseries(self, frequencyseries, low_freq_cutoff,
+                                 psd_name=None):
+        from pycbc.types import FrequencySeries
+        if not isinstance(frequencyseries, FrequencySeries):
+            msg = 'Input must be a pycbc.types.FrequencySeries. Got type'
+            msg += ' {} instead.'
+            msg = msg.format(type(frequencyseries))
+            raise TypeError(msg)
+        length = len(frequencyseries)
+        delta_f = frequencyseries.delta_f
+        return self.get(length, delta_f, low_freq_cutoff,
+                        psd_name=psd_name)
 
 class MPCounter(object):
     def __init__(self, val=0):
