@@ -27,7 +27,7 @@ def list_length(inp):
     else:
         return 1
 
-def input_to_list(inp, length=1):
+def input_to_list(inp, length=None):
     """Convert the input to a list of a given length.
     If the input is not a list, a list of the given length will be
     created. The contents of this list are all the same input value.
@@ -36,8 +36,9 @@ def input_to_list(inp, length=1):
     ---------
     inp : list or other
         The input that should be turned into a list.
-    length : {int, 1}
-        The length of the output list.
+    length : {int or None, None}
+        The length of the output list. If set to None this function will
+        call list_length to determine the length of the list.
     
     Returns
     -------
@@ -45,6 +46,8 @@ def input_to_list(inp, length=1):
         Either returns the input, when the input is a list of matching
         length or a list of the wanted length filled with the input.
     """
+    if length is None:
+        length = list_length(inp)
     if isinstance(inp, list):
         if len(inp) != length:
             msg = f'Length of list {len(inp)} does not match the length'
@@ -54,3 +57,20 @@ def input_to_list(inp, length=1):
             return inp
     else:
         return [inp] * length
+
+def field_array_to_dict(inp):
+    """Convert a pycbc.io.record.FieldArray to a standard Python
+    dictionary.
+    
+    Arguments
+    ---------
+    inp : pycbc.io.record.FieldArray or numpy.recarry
+        The array to convert.
+    
+    Returns
+    -------
+    dict:
+        A dict where each value is a list containing the values of the
+        numpy array.
+    """
+    return {name: list(inp[name]) for name in inp.dtype.names}
