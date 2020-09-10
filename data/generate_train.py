@@ -9,6 +9,8 @@ from BnsLib.types.utils import DictList, MPCounter
 import multiprocessing as mp
 from pycbc.types import TimeSeries
 import datetime
+from pycbc.noise import noise_from_string
+from BnsLib.data.transform import whiten
 
 def multi_wave_worker(idx, wave_params, projection_params,
                       detector_names, transform, domain, progbar,
@@ -63,11 +65,17 @@ def multi_wave_worker(idx, wave_params, projection_params,
         detectors = [Detector(det) for det in detector_names]
     ret = DictList()
     for wav_params, proj_params in zip(wave_params, projection_params):
-        ret.append(signal_worker(wav_params,
-                                 proj_params,
-                                 detectors,
-                                 transform,
-                                 domain=domain))
+        sig = signal_worker(wav_params,
+                            proj_params,
+                            detectors,
+                            transform,
+                            domain=domain)
+        for key, val in sig.items():
+            if key in ret:
+                ret.append(key, value=val)
+            else:
+                ret.append(key, value=[val])
+        #ret.append(ret)
         if progbar is not None:
             progbar.iterate()
     output.put((idx, ret.as_dict()))
@@ -95,6 +103,30 @@ def signal_worker(wave_params, projection_params, detectors, transform,
             fp, fc = det.antenna_pattern(*projection_params)
             ret[det.name] = transform(fp * hp + fc * hc)
     return ret
+
+def multi_noise_worker(length, delta_t, psd_name, flow, number,
+                       transform, bar, output):
+    ret = []
+    if psd_name.lower() == 'simple':
+        sample_rate = int(1. / delta_t)
+        nyquist = int(1. / (2 * delta_t))
+        scale = np.sqrt(nyquist)
+        total_noise = np.random.normal(loc=0., scale=scale,
+                                       size=(number, length))
+        for noise in total_noise:
+            ret.append(transform(TimeSeries(noise, delta_t=delta_t)))
+            if bar is not None:
+                bar.iterate()
+    else:
+        for _ in range(number): 
+            seed = np.random.randint(0, 1e7)
+            noise = noise_from_string(psd_name, length, delta_t,
+                                      seed=seed,
+                                      low_frequency_cutoff=flow)
+            ret.append(transform(noise))
+            if bar is not None:
+                bar.iterate()
+    output.put(ret)
 
 class WaveformGetter(object):
     def __init__(self, variable_params=None, static_params=None,
@@ -641,3 +673,156 @@ class WaveformGenerator(WaveformGetter):
             if key in params:
                 self.variable_params[key].append(params[key][0])
         return self[len(self)-1]
+
+class NoiseGenerator(object):
+    """A class that efficiently generates time series noise samples of
+    equal length.
+    
+    Arguments
+    ---------
+    length : int
+        The length of each noise in number of samples.
+    delta_t : float
+        The time between two samples in seconds.
+    psd_name : {str, 'simple'}
+        The name of the power spectral densitiy that should be used to
+        color the noise. If set to 'simple' gaussian noise with a
+        standard deviation of sqrt(1 / (2 * delta_t)) will be generated.
+    low_frequency_cutoff : {float, 20.}
+        The low frequency cutoff. Below this frequency the noise will be
+        set to 0.
+    """
+    def __init__(self, length, delta_t, psd_name='simple',
+                 low_frequency_cutoff=20.):
+        self.length = length
+        self.delta_t = delta_t
+        self.psd_name = psd_name
+        self.flow = low_frequency_cutoff
+    
+    def generate(self, number, workers=None, verbose=True):
+        """Generate a list of independently drawn noise samples.
+        
+        Arguments
+        ---------
+        number : int
+            The number of noise samples that should be generated.
+        workers : {int or None, None}
+            This function may run in parallel. When setting this
+            argument to an integer the user specifies how many processes
+            will be spawned. If set to None the code will spawn as many
+            processes as there are CPU-cores available. To run the code
+            in serial set this argument to 0.
+        verbose : {bool, True}
+            Whether or not to print a dynamic progress bar.
+        
+        Returns
+        -------
+        list of TimeSeries:
+            Returns a list of pycbc.types.TimeSeries objects that
+            contain noise. The list will be of length `number`.
+        """
+        if workers is None:
+            workers = mp.cpu_count()
+        
+        if workers == 0:
+            class PutList(object):
+                def __init__(self):
+                    self.content = []
+                
+                def put(self, content):
+                    self.content.extend(content)
+            
+            bar = None
+            if verbose:
+                bar = progress_tracker(number, name='Generating noise')
+            
+            output = PutList()
+            
+            multi_noise_worker(self.length, self.delta_t, self.psd_name,
+                               self.flow, number, self.transform, bar,
+                               output)
+            
+            return output.content
+        
+        noise_per_worker = [number // workers] * workers
+        if sum(noise_per_worker) < number:
+            for i in range(numbers - sum(noise_per_worker)):
+                waves_per_process[i] += 1
+        
+        bar = None
+        if verbose:
+            bar = mp_progress_tracker(number, name='Generating noise')
+        
+        jobs = []
+        output = mp.Queue()
+        for i in range(workers):
+            p = mp.Process(target=multi_noise_worker,
+                           args=(self.length,
+                                 self.delta_t,
+                                 self.psd_name,
+                                 self.flow,
+                                 noise_per_worker[i],
+                                 self.transform,
+                                 bar,
+                                 output))
+            jobs.append(p)
+        
+        for p in jobs:
+            p.start()
+        
+        results = [output.get() for p in jobs]
+        
+        for p in jobs:
+            p.join()
+        
+        ret = []
+        for pt in results:
+            ret.extend(pt)
+        
+        return ret
+    
+    def transform(self, noise):
+        return noise
+
+class WhiteNoiseGenerator(NoiseGenerator):
+    """A class that efficiently generates white time series noise. If a
+    power spectrum is given to color the noise, the output will be
+    whitened by the same power spectrum.
+    
+    Arguments
+    ---------
+    length : int
+        The length of each noise in number of samples.
+    delta_t : float
+        The time between two samples in seconds.
+    psd_name : {str, 'simple'}
+        The name of the power spectral densitiy that should be used to
+        color the noise. If set to 'simple' gaussian noise with a
+        standard deviation of sqrt(1 / (2 * delta_t)) will be generated.
+    low_frequency_cutoff : {float, 20.}
+        The low frequency cutoff. Below this frequency the noise will be
+        set to 0.
+    
+    Notes
+    -----
+    -When subclassing this class and applying a different transform,
+     make sure to call the transform method of this class first:
+     
+     >>> class CustomWhiteNoise(WhiteNoiseGenerator):
+     >>>    def transform(self, noise):
+     >>>        noise = super().transform(noise)
+     >>>        #Your custom operations
+     >>>        return noise
+    """
+    def __init__(self, length, delta_t, psd_name='simple',
+                 low_frequency_cutoff=20.):
+        if psd_name.lower() != 'simple':
+            length += 8 * int(1. / delta_t)
+        super().__init__(length, delta_t, psd_name=psd_name,
+                         low_frequency_cutoff=low_frequency_cutoff)
+    
+    def transform(self, noise):
+        if self.psd_name.lower() == 'simple':
+            return noise
+        return whiten(noise, low_freq_cutoff=self.flow,
+                      psd=self.psd_name)
