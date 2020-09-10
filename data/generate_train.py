@@ -747,7 +747,7 @@ class NoiseGenerator(object):
         noise_per_worker = [number // workers] * workers
         if sum(noise_per_worker) < number:
             for i in range(number - sum(noise_per_worker)):
-                waves_per_process[i] += 1
+                noise_per_worker[i] += 1
         
         bar = None
         if verbose:
