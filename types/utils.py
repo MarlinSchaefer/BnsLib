@@ -342,7 +342,7 @@ class DataSize(object):
         elif isinstance(size, type(self)):
             self.size = self.convert[unit](size.as_bytes())
         else:
-            assert isinstance(size, int)
+            assert isinstance(size, (int, float))
             self.size = size
         assert unit in self.dtypes
         self.unit = unit
