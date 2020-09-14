@@ -1,4 +1,7 @@
 import multiprocessing as mp
+from collections import OrderedDict
+import sys
+import numpy as np
 
 class DictList(object):
     """A table-like object. It is a dictionary where each value is a
@@ -285,3 +288,278 @@ class MPCounter(object):
     @property
     def value(self):
         return self.val.value
+
+def memsize(obj):
+    """Tries to approximate the size of an object. If the object is not
+    a list or a tuple, the returned size will be sys.getsizeof(obj).
+    Otherwise the function will recursively call itself until the
+    argument is not a list or tuple anymore.
+    
+    Arguments
+    ---------
+    obj : object
+        The object of which to infer the size of.
+    
+    Returns
+    -------
+    DataSize:
+        The size of the object in bytes.
+    """
+    if isinstance(obj, (list, tuple)):
+        return DataSize(sys.getsizeof(obj) + sum([memsize(pt) for pt in obj]))
+    else:
+        return DataSize(sys.getsizeof(obj))
+
+class DataSize(object):
+    """A data-type used to store and compare file-sizes.
+    
+    Arguments
+    ---------
+    size : int or DataSize or None
+        The size of an object or file.
+    unit : {str, None}
+        The unit in which the size was given. (from bits: 'b', over
+        bytes: 'B', up to petabytes 'PB')
+    """
+    dtypes = ['b', 'B', 'kb', 'kB', 'Mb', 'MB', 'Gb', 'GB', 'Tb', 'TB',
+              'Pb', 'PB']
+    convert = {'b': lambda size: size // 8,
+               'B': lambda size: size,
+               'kb': lambda size: (size * 1000) // 8,
+               'kB': lambda size: size * 1000,
+               'Mb': lambda size: (1e6 * size) // 8,
+               'MB': lambda size: 1e6 * size,
+               'Gb': lambda size: (1e9 * size) // 8,
+               'GB': lambda size: 1e9 * size,
+               'Tb': lambda size: (1e12 * size) // 8,
+               'TB': lambda size: 1e12 * size,
+               'Pb': lambda size: (1e15 * size) // 8,
+               'PB': lambda size: 1e15 * size,
+               }
+    def __init__(self, size, unit='B'):
+        if size is None:
+            self.size = None
+        elif isinstance(size, type(self)):
+            self.size = self.convert[unit](size.as_bytes())
+        else:
+            assert isinstance(size, int)
+            self.size = size
+        assert unit in self.dtypes
+        self.unit = unit
+    
+    def as_bytes(self):
+        if self.size is None:
+            return np.inf
+        else:
+            return self.convert[self.unit](self.size)
+    
+    def convert_to(self, unit):
+        return DataSize(self.convert[unit](self.as_bytes()), unit=unit)
+    
+    def __lt__(self, other):
+        if isinstance(other, type(self)):
+            return self.as_bytes().__lt__(other.as_bytes())
+        else:
+            return self.as_bytes().__lt__(other)
+    
+    def __le__(self, other):
+        if isinstance(other, type(self)):
+            return self.as_bytes().__le__(other.as_bytes())
+        else:
+            return self.as_bytes().__le__(other)
+    
+    def __eq__(self, other):
+        if isinstance(other, type(self)):
+            return self.as_bytes().__eq__(other.as_bytes())
+        else:
+            return self.as_bytes().__eq__(other)
+    
+    def __ne__(self, other):
+        if isinstance(other, type(self)):
+            return self.as_bytes().__ne__(other.as_bytes())
+        else:
+            return self.as_bytes().__ne__(other)
+    
+    def __gt__(self, other):
+        if isinstance(other, type(self)):
+            return self.as_bytes().__gt__(other.as_bytes())
+        else:
+            return self.as_bytes().__gt__(other)
+    
+    def __ge__(self, other):
+        if isinstance(other, type(self)):
+            return self.as_bytes().__ge__(other.as_bytes())
+        else:
+            return self.as_bytes().__ge__(other)
+    
+    def get_best_unit(self):
+        conversion = {0: 'B',
+                      3: 'kB',
+                      6: 'MB',
+                      9: 'GB',
+                      12: 'TB',
+                      15: 'PB'}
+        base = int(np.log10(self.as_bytes()))
+        best_fitting = 0
+        for unit in sorted(list(conversion.keys())):
+            if unit < base:
+                best_fitting = unit
+        return conversion[best_fitting]
+    
+    def __str__(self):
+        best_unit = self.get_best_unit()
+        size = self.convert[best_unit](self.as_bytes())
+        return '%.2f %s' % (size, best_unit)
+    
+    def __repr__(self):
+        return 'DataSize({}, unit={})'.format(self.size, self.unit)
+    
+    def __add__(self, other):
+        if isinstance(other, type(self)):
+            return DataSize(self.as_bytes() + other.as_bytes(), unit='B')
+        else:
+            return DataSize(self.as_bytes() + other, unit='B')
+    
+    def __radd__(self, other):
+        return self.__add__(other)
+    
+    def __sub__(self, other):
+        if isinstance(other, type(self)):
+            return DataSize(self.as_bytes() - other.as_bytes(), unit='B')
+        else:
+            return DataSize(self.as_bytes() - other, unit='B')
+    
+    def __rsub__(self, other):
+        return DataSize(other - self.as_bytes(), unit='B')
+    
+    def __mul__(self, other):
+        if isinstance(other, type(self)):
+            raise TypeError('Cannot multiply datasize by datasize.')
+        else:
+            return DataSize(self.as_bytes() * other, unit='B')
+    
+    def __rmul__(self, other):
+        if isinstance(other, type(self)):
+            raise TypeError('Cannot multiply datasize by datasize.')
+        else:
+            return DataSize(self.as_bytes() * other, unit='B')
+    
+    def __truediv__(self, other):
+        if isinstance(other, type(self)):
+            raise TypeError('Cannot divide datasize by datasize.')
+        else:
+            return DataSize(self.as_bytes() / other, unit='B')
+    
+    def __rtruediv__(self, other):
+        if isinstance(other, type(self)):
+            raise TypeError('Cannot divide datasize by datasize.')
+        else:
+            return DataSize(other / self.as_bytes(), unit='B')
+    
+    def __floordiv__(self, other):
+        if isinstance(other, type(self)):
+            raise TypeError('Cannot divide datasize by datasize.')
+        else:
+            return DataSize(self.as_bytes() // other, unit='B')
+    
+    def __rfloordiv__(self, other):
+        if isinstance(other, type(self)):
+            raise TypeError('Cannot divide datasize by datasize.')
+        else:
+            return DataSize(other // self.as_bytes(), unit='B')
+
+class LimitedSizeDict(OrderedDict):
+    """A dictionary that only allows entries to require a given amount
+    of memory.
+    
+    This dictionary must be initialized empty and can only be added to
+    via the __setitem__ method or its abbreviation `dict[key] = val`.
+    
+    Arguments
+    ---------
+    size_limit : {int or DataSize or None, None}
+        The memory size limit for the dict.
+    unit : {str, 'B'}
+        The unit of the size limit. Must be a unit understood by
+        DataSize.
+    error_on_overflow : {bool, False}
+        Whether or not to raise an error if an attempt is made to insert
+        a value with a size that exceeds the size limit.
+    
+    Notes
+    -----
+    -Only the size of the values is monitored. Therefore, the
+     LimitedSizeDict may significantly outgrow its size-limit if keys of
+     large memory size are used.
+    -The function memsize is used to calculate the size of the items.
+    """
+    def __init__(self, size_limit=None, unit='B',
+                 error_on_overflow=False):
+        super().__init__()
+        if size_limit is None:
+            self._size_limit = None
+        elif isinstance(size_limit, DataSize):
+            self._size_limit = size_limit
+        else:
+            self._size_limit = DataSize(size_limit, unit=unit)
+        self._remaining_size = self._size_limit
+        self._error_on_overflow = error_on_overflow
+    
+    def __setitem__(self, key, value):
+        if self._size_limit is None:
+            super().__setitem__(key, value)
+        else:
+            item_size = memsize(value)
+            if item_size > self._size_limit:
+                if self._error_on_overflow:
+                    msg = 'Cannot insert an item of size {} into a size '
+                    msg += 'limited dict with size limit {}.'
+                    msg = msg.format(item_size, self._size_limit)
+                    raise ValueError(msg)
+                else:
+                    return
+            
+            if key in self:
+                item_size -= memsize(self[key])
+            
+            #Pop items until size limit is reached.
+            while self._remaining_size < item_size:
+                popped_item = self.popitem(last=False)
+                self._remaining_size += memsize(popped_item)
+            self._remaining_size -= item_size
+            super().__setitem__(key, value)
+    
+    def fits(self, value):
+        """Check if memory size of the value is smaller than the
+        size-limit of the dictionary.
+        
+        Arguments
+        ---------
+        value : object
+            The object of which the size should be checked.
+        
+        Returns
+        -------
+        bool:
+            Returns True if it is possible to insert this value into the
+            dictionary.
+        """
+        return self._size_limit >= memsize(value)
+    
+    def fits_lossless(self, value):
+        """Check if the value can be inserted into the dictionary
+        without deleting any previously inserted values.
+        
+        Arguments
+        ---------
+        value : object
+            The object of which the size should be checked.
+        
+        Returns
+        -------
+        bool:
+            Returns True if the value can be inserted into the
+            dictionary without deleting any other values from the
+            dictionary.
+        """
+        return self._remaining_size >= memsize(value)
