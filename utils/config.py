@@ -803,6 +803,7 @@ def config_to_dict(*file_paths, split_sections=True, constants=None,
     """
     ret = {}
     conf = configparser.ConfigParser()
+    conf.optionxform = str
     conf.read(*file_paths)
     for sec in conf.sections():
         tmp = {}
