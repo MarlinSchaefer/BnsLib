@@ -1,6 +1,7 @@
 import tensorflow as tf
 from tensorflow import keras
 from keras.layers import Conv1D, MaxPooling1D
+import numpy as np
 
 class BaseInception1D(object):
     """A class that implements a 1D inception module. Strictly speaking,
@@ -76,7 +77,6 @@ class BaseInception1D(object):
                                'padding': ['same'] * 3,
                                'data_format': ['channels_last'] * 3,
                                'dilation_rate': [1, 1, 1],
-                               'groups': [1, 1, 1],
                                'activation': ['relu'] * 3,
                                'use_bias': [True] * 3,
                                'kernel_initializer': ['glorot_uniform'] * 3,
@@ -86,6 +86,13 @@ class BaseInception1D(object):
                                'activity_regularizer': [None] * 3,
                                'kernel_constraint': [None] * 3,
                                'bias_constraint': [None] * 3}
+        version = tf.__version__.split('.')
+        version = np.array([int(pt) for pt in version])
+        mult_factor = np.array([10**i for i in range(len(version)).__reversed__()])
+        version = sum(version * mult_factor)
+        if version > 220:
+            self.conv_defaults['groups'] = [1, 1, 1]
+        
         self.dimred_defaults = {'dimred_filters': [16] * 3,
                                 'dimred_kernel_size': [1] * 3,
                                 'dimred_padding': ['same'] * 3,
