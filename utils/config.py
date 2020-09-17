@@ -726,15 +726,22 @@ def get_config_value(inp, constants=None, functions=None):
             #TODO: Add this functionality to ExpressionString?
             ret = []
             parts = ['']
+            in_string = False
             open_brackets = 0
             for char in inp[1:-1]:
-                if char == ',' and open_brackets == 0:
+                if char == ',' and open_brackets == 0 and not in_string:
                     parts.append('')
-                elif char in ['(', '[']:
+                elif char in ['(', '[', '{']:
                     open_brackets += 1
                     parts[-1] += char
-                elif char in [')', ']']:
+                elif char in [')', ']', '{']:
                     open_brackets -= 1
+                    parts[-1] += char
+                elif char in ['"', "'"]:
+                    if in_string:
+                        in_string = False
+                    else:
+                        in_string = True
                     parts[-1] += char
                 else:
                     parts[-1] += char
@@ -748,15 +755,22 @@ def get_config_value(inp, constants=None, functions=None):
             #TODO: Add this functionality to ExpressionString?
             ret = {}
             parts = ['']
+            in_string = False
             open_brackets = 0
             for char in inp[1:-1]:
-                if char == ',' and open_brackets == 0:
+                if char == ',' and open_brackets == 0 and not in_string:
                     parts.append('')
-                elif char in ['(', '[']:
+                elif char in ['(', '[', '{']:
                     open_brackets += 1
                     parts[-1] += char
-                elif char in [')', ']']:
+                elif char in [')', ']', '}']:
                     open_brackets -= 1
+                    parts[-1] += char
+                elif char in ['"', "'"]:
+                    if in_string:
+                        in_string = False
+                    else:
+                        in_string = True
                     parts[-1] += char
                 else:
                     parts[-1] += char
