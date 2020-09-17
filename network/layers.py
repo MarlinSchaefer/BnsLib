@@ -1,6 +1,6 @@
 import tensorflow as tf
 from tensorflow import keras
-from keras.layers import Conv1D, MaxPooling1D
+from tensorflow.keras.layers import Conv1D, MaxPooling1D
 import numpy as np
 
 class BaseInception1D(object):
