@@ -732,8 +732,10 @@ def get_config_value(inp, constants=None, functions=None):
                     parts.append('')
                 elif char in ['(', '[']:
                     open_brackets += 1
+                    parts[-1] += char
                 elif char in [')', ']']:
                     open_brackets -= 1
+                    parts[-1] += char
                 else:
                     parts[-1] += char
             for pt in parts:
