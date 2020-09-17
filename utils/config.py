@@ -716,6 +716,7 @@ def get_config_value(inp, constants=None, functions=None):
      parser cannot resolve the string to a Python expression the value
      is returned as a string.
     """
+    inp = inp.lstrip().rstrip()
     if len(inp) > 1:
         #Test for string
         if inp[0] in ["'", '"'] and inp[-1] in ["'", '"']:
@@ -739,6 +740,37 @@ def get_config_value(inp, constants=None, functions=None):
                 ret.append(get_config_value(pt,
                                             constants=constants,
                                             functions=functions))
+            return ret
+        #Test for dict
+        elif inp[0] == '{' and inp[-1] == '}':
+            #TODO: Add this functionality to ExpressionString?
+            ret = {}
+            parts = ['']
+            open_brackets = 0
+            for char in inp[1:-1]:
+                if char == ',' and open_brackets == 0:
+                    parts.append('')
+                elif char in ['(', '[']:
+                    open_brackets += 1
+                    parts[-1] += char
+                elif char in [')', ']']:
+                    open_brackets -= 1
+                    parts[-1] += char
+                else:
+                    parts[-1] += char
+            #return parts
+            for pt in parts:
+                tmp = pt.split(':')
+                if len(tmp) != 2:
+                    raise ValueError
+                key = get_config_value(tmp[0],
+                                       constants=constants,
+                                       functions=functions)
+                value = get_config_value(tmp[1],
+                                         constants=constants,
+                                         functions=functions)
+                
+                ret[key] = value
             return ret
     
     if constants is None:
