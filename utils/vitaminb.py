@@ -43,7 +43,7 @@ def params_files_from_config(params_config_file, network_config_file,
     params_out['vonmise_pars'] = []
     params_out['sky_pars'] = []
     params_out['boost_pars'] = []
-    params_out['no_dist'] = []
+    params_out['no_dist_pars'] = []
     
     params_keys = list(params_content['variable'].keys())
     for key in params_keys:
