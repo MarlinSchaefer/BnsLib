@@ -38,6 +38,9 @@ class SnrCurriculumLearningScheduler(keras.callbacks.Callback):
         self.lower_by = lower_by
         self.min_snr = min_snr
     
+    def on_epoch_begin(self, epoch, logs=None):
+        print("Training with target: {}".format(self.generator.target))
+    
     def on_epoch_end(self, epoch, logs={}):
         lower = False
         if isinstance(self.lower_at, int):
