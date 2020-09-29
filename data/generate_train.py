@@ -11,6 +11,7 @@ from pycbc.types import TimeSeries
 import datetime
 from pycbc.noise import noise_from_string
 from BnsLib.data.transform import whiten
+import time
 
 def multi_wave_worker(idx, wave_params, projection_params,
                       detector_names, transform, domain, progbar,
@@ -99,6 +100,14 @@ def signal_worker(wave_params, projection_params, detectors, transform,
     else:
         st = float(hp.start_time)
         projection_params.append(st)
+        #print(projection_params)
+        req_opt = [np.isnan(pt) for pt in projection_params[:2]]
+        if any(req_opt):
+            opt_ra, opt_dec = detectors[0].optimal_orientation(st)
+            if req_opt[0]:
+                projection_params[0] = opt_ra
+            if req_opt[1]:
+                projection_params[1] = opt_dec
         for det in detectors:
             fp, fc = det.antenna_pattern(*projection_params)
             ret[det.name] = transform(fp * hp + fc * hc)
@@ -277,6 +286,8 @@ class WaveformGetter(object):
                     if len(self.variable_params[dec_key]) <= i:
                         for _ in range(i+1-len(self.variable_params[dec_key])):
                             self.variable_params[dec_key].append(np.nan)
+                #FIXME: Cannot have the same source at different
+                #       sky-positions
                 for det in self.detectors:
                     st = float(hp.start_time)
                     calc_opt = {ra_key: np.isnan(wave_kwargs[ra_key]),
@@ -335,16 +346,25 @@ class WaveformGetter(object):
             else:
                 if 'ra' in params:
                     ra_key = 'ra'
-                if 'right_ascension' in params:
+                elif 'right_ascension' in params:
                     ra_key = 'right_ascension'
+                else:
+                    ra_key = 'ra'
+                    params['ra'] = np.nan
                 if 'dec' in params:
                     dec_key = 'dec'
-                if 'declination' in params:
+                elif 'declination' in params:
                     dec_key = 'declination'
+                else:
+                    dec_key = 'dec'
+                    params['dec'] = np.nan
                 if 'pol' in params:
                     pol_key = 'pol'
-                if 'polarization' in params:
+                elif 'polarization' in params:
                     pol_key = 'polarization'
+                else:
+                    pol_key = 'pol'
+                    params['pol'] = 0.
                 projection_params.append([params[key] for key in [ra_key, dec_key, pol_key]])
         
         if self.detectors is None:
@@ -569,7 +589,9 @@ class WFParamGenerator(object):
         drawn from this distribution and transformed according to the
         transformations.
     """
-    def __init__(self, config_file, seed=0):
+    def __init__(self, config_file, seed=None):
+        if seed is None:
+            seed = int(time.time())
         np.random.seed(seed)
         config_file = input_to_list(config_file)
         config_file = WorkflowConfigParser(config_file, None)

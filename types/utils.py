@@ -2,6 +2,7 @@ import multiprocessing as mp
 from collections import OrderedDict
 import sys
 import numpy as np
+from pycbc.psd import from_string
 
 class DictList(object):
     """A table-like object. It is a dictionary where each value is a
@@ -195,7 +196,6 @@ class DictList(object):
 class NamedPSDCache(object):
     def __init__(self, psd_names=None):
         from BnsLib.utils.formatting import input_to_list
-        from pycbc.psd import from_string
         if psd_names is None:
             self.psd_cache = {}
         else:

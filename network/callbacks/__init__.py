@@ -1,1 +1,1 @@
-from BnsLib.network.callbacks import *
+from BnsLib.network.callbacks.curriculum_learning import *
