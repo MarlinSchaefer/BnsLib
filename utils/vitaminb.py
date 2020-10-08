@@ -77,16 +77,16 @@ def params_files_from_config(params_config_file, network_config_file,
         fixed_vals_out[translation[key]] = params_content['fixed'][key]
         if key in params_content:
             if 'min' in params_content[key]:
-                bounds[translation[key]+'_min'] = params_content[key]['min']
+                bounds_out[translation[key]+'_min'] = params_content[key]['min']
             else:
-                bounds[translation[key]+'_min'] = fixed_vals_out[translation[key]]
+                bounds_out[translation[key]+'_min'] = fixed_vals_out[translation[key]]
             if 'max' in params_content[key]:
-                bounds[translation[key]+'_max'] = params_content[key]['max']
+                bounds_out[translation[key]+'_max'] = params_content[key]['max']
             else:
-                bounds[translation[key]+'_max'] = fixed_vals_out[translation[key]]
+                bounds_out[translation[key]+'_max'] = fixed_vals_out[translation[key]]
         else:
-            bounds[translation[key]+'_min'] = fixed_vals_out[translation[key]]
-            bounds[translation[key]+'_max'] = fixed_vals_out[translation[key]]
+            bounds_out[translation[key]+'_min'] = fixed_vals_out[translation[key]]
+            bounds_out[translation[key]+'_max'] = fixed_vals_out[translation[key]]
      
     return params_out, bounds_out, fixed_vals_out
         
