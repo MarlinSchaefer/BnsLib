@@ -113,7 +113,7 @@ def signal_worker(wave_params, projection_params, detectors, transform,
             ret[det.name] = transform(fp * hp + fc * hc)
     return ret
 
-def multi_noise_worker(length, delta_t, psd_name, flow, number,
+def multi_noise_worker(length, delta_t, psd_name, flow, number, seed,
                        transform, bar, output):
     ret = []
     if psd_name.lower() == 'simple':
@@ -127,10 +127,11 @@ def multi_noise_worker(length, delta_t, psd_name, flow, number,
             if bar is not None:
                 bar.iterate()
     else:
-        for _ in range(number): 
-            seed = np.random.randint(0, 1e7)
+        np.random.seed(seed)
+        seeds = np.random.randint(0, 1e7, size=number, dtype=int)
+        for i in range(number): 
             noise = noise_from_string(psd_name, length, delta_t,
-                                      seed=seed,
+                                      seed=int(seeds[i]),
                                       low_frequency_cutoff=flow)
             ret.append(transform(noise))
             if bar is not None:
@@ -721,7 +722,7 @@ class NoiseGenerator(object):
         self.psd_name = psd_name
         self.flow = low_frequency_cutoff
     
-    def generate(self, number, workers=None, verbose=True):
+    def generate(self, number, workers=None, verbose=True, seed=None):
         """Generate a list of independently drawn noise samples.
         
         Arguments
@@ -736,6 +737,9 @@ class NoiseGenerator(object):
             in serial set this argument to 0.
         verbose : {bool, True}
             Whether or not to print a dynamic progress bar.
+        seed : {int or None, None}
+            The seed to use for noise generation. If set to None the
+            current time in milliseconds will be used as seed.
         
         Returns
         -------
@@ -743,6 +747,9 @@ class NoiseGenerator(object):
             Returns a list of pycbc.types.TimeSeries objects that
             contain noise. The list will be of length `number`.
         """
+        if seed is None:
+            seed = int(time.time())
+        
         if workers is None:
             workers = mp.cpu_count()
         
@@ -761,8 +768,8 @@ class NoiseGenerator(object):
             output = PutList()
             
             multi_noise_worker(self.length, self.delta_t, self.psd_name,
-                               self.flow, number, self.transform, bar,
-                               output)
+                               self.flow, number, seed, self.transform,
+                               bar, output)
             
             return output.content
         
@@ -777,6 +784,8 @@ class NoiseGenerator(object):
         
         jobs = []
         output = mp.Queue()
+        np.random.seed(seed)
+        seeds = np.random.randint(0, 1e7, size=workers)
         for i in range(workers):
             p = mp.Process(target=multi_noise_worker,
                            args=(self.length,
@@ -784,6 +793,7 @@ class NoiseGenerator(object):
                                  self.psd_name,
                                  self.flow,
                                  noise_per_worker[i],
+                                 seeds[i],
                                  self.transform,
                                  bar,
                                  output))
