@@ -87,6 +87,23 @@ def params_files_from_config(params_config_file, network_config_file,
         else:
             bounds_out[translation[key]+'_min'] = fixed_vals_out[translation[key]]
             bounds_out[translation[key]+'_max'] = fixed_vals_out[translation[key]]
+    
+    bounds_keys = list(params_content['boudns'].keys())
+    for key in fixed_keys:
+        if key not in translation:
+            translation[key] = key
+        
+        if key in params_content:
+            if 'min' in params_content[key]:
+                bounds_out[translation[key]+'_min'] = params_content[key]['min']
+            else:
+                raise RuntimeError
+            if 'max' in params_content[key]:
+                bounds_out[translation[key]+'_max'] = params_content[key]['max']
+            else:
+                raise RuntimeError
+        else:
+            raise RuntimeError
      
     return params_out, bounds_out, fixed_vals_out
         
