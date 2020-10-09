@@ -90,7 +90,7 @@ def params_files_from_config(params_config_file, network_config_file,
     
     if 'bounds' in params_content:
         bounds_keys = list(params_content['bounds'].keys())
-        for key in fixed_keys:
+        for key in bounds_keys:
             if key not in translation:
                 translation[key] = key
             
