@@ -1,1 +1,1 @@
-from BnsLib.network.generators.continuous import *
+from BnsLib.network.generators.stream.continuous import *
