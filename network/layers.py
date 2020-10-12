@@ -1,6 +1,9 @@
 import tensorflow as tf
 from tensorflow import keras
-from tensorflow.keras.layers import Conv1D, MaxPooling1D
+from tensorflow import keras
+from tensorflow.keras.layers import Conv1D, MaxPooling1D, Layer
+from tensorflow.keras import backend as K
+from tensorflow.python.ops import nn
 import numpy as np
 
 class BaseInception1D(object):
@@ -197,3 +200,21 @@ class BaseInception1D(object):
                                          left_conv,
                                          right_conv,
                                          rightmost_dimred])
+
+class InputNormalization(Layer):
+    def __init__(self, *args, **kwargs):
+        self.normalize_mean = kwargs.pop('normalize_mean', True)
+        self.normalize_std = kwargs.pop('normalize_std', True)
+        super().__init__(*args, **kwargs)
+    
+    def call(self, inputs):
+        if self.normalize_mean or self.normalize_std:
+            mean, std = nn.moments(inputs, [1], keep_dims=True)
+        if self.normalize_mean and self.normalize_std:
+            return (inputs - mean) / std
+        elif self.normalize_mean:
+            return inputs - mean
+        elif self.normalize_std:
+            return inputs / std
+        else:
+            return inputs
