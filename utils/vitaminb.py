@@ -142,7 +142,7 @@ def vitaminb_params_to_pycbc_params(in_config_file, out_config_file):
     static_args_set_dict = {}
     for key, val in static_args.items():
         if val is not None:
-            static_args_set_dict[key] val
+            static_args_set_dict[key] = val
     config["static_args"] = static_args_set_dict
     
     #Write variable arguments
