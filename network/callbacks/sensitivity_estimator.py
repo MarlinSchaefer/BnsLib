@@ -119,7 +119,7 @@ class SensitivityEstimator(keras.callbacks.Callback):
             print("Estimating the sensitivity of the network")
         if isinstance(self.threshold, (int, float)):
             threshold = self.threshold
-        else
+        else:
             noise_floor = self.model.predict(self.threshold,
                                              verbose=self.verbose)
             noise_floor = self.transform(noise_floor)
