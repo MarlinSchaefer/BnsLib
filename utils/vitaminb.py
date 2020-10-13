@@ -87,8 +87,9 @@ def params_files_from_config(params_config_file, network_config_file,
                 if fixed_vals_out[translation[key]] is not None:
                     bounds_out[translation[key]+'_max'] = fixed_vals_out[translation[key]]
         else:
-            bounds_out[translation[key]+'_min'] = fixed_vals_out[translation[key]]
-            bounds_out[translation[key]+'_max'] = fixed_vals_out[translation[key]]
+            if fixed_vals_out[translation[key]] is not None:
+                bounds_out[translation[key]+'_min'] = fixed_vals_out[translation[key]]
+                bounds_out[translation[key]+'_max'] = fixed_vals_out[translation[key]]
     
     if 'bounds' in params_content:
         bounds_keys = list(params_content['bounds'].keys())
