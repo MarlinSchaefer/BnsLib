@@ -57,7 +57,7 @@ class SensitivityEstimator(keras.callbacks.Callback):
     **kwargs : 
         Remaining keyword-arguments are passed to the base-class.
     """
-    def __init__(signal_generator, threshold=0.5,
+    def __init__(self, signal_generator, threshold=0.5,
                  file_path='sensitivity_estimate.csv', save_freq=1,
                  transform_function=None, snrs=None, header=None,
                  verbose=1, **kwargs):
