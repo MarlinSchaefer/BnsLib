@@ -1,5 +1,6 @@
 from tensorflow import keras
 from BnsLib.utils.math import safe_min, safe_max
+import warnings
 
 class SnrCurriculumLearningScheduler(keras.callbacks.Callback):
     """A callback that schedules when the SNR of the data-samples should
@@ -11,11 +12,22 @@ class SnrCurriculumLearningScheduler(keras.callbacks.Callback):
         The generator that provides the data-samples to the network.
         This generator needs to have an attribute `target` and a method
         `rescale`. For details see the notes section.
+    lower_by_monitor : {floar or None, None}
+        The target value for the monitored quantity. If this value is
+        surpassed (in the direction specified by `mode`) the SNR is
+        lowered by the specified amount. If set to None the SNR will not
+        be lowered due to the monitored value. If `lower_by_epoch` is
+        not None as well as this attribute, the SNR will be lowered when
+        either target is hit.
+    lower_by_epoch : {int or None, None}
+        
     lower_at : {int or float, 10}
-        Specifies when the SNR should be lowered. If set to an integer
-        the SNR will be lowered after that number of epochs regardless
-        of the monitored quantity. When set to a float the SNR will be
-        lowered once the monitored quantity drops below this value.
+        DEPRECATED: Specifies when the SNR should be lowered. If set to
+        an integer the SNR will be lowered after that number of epochs
+        regardless of the monitored quantity. When set to a float the
+        SNR will be lowered once the monitored quantity drops below this
+        value. Please use `lower_by_epoch` or `lower_by_monitor`
+        instead.
     lower_by : {float, 5.}
         The value by which the SNR should be lowered.
     min_snr : {float, 5.}
@@ -40,29 +52,42 @@ class SnrCurriculumLearningScheduler(keras.callbacks.Callback):
     -The `rescale` method must take a list of length 2 as argument. The
      list contains the new target value.
     """
-    def __init__(self, generator, lower_at=10, lower_by=5., min_snr=5.,
+    def __init__(self, generator, lower_at=None, lower_by_monitor=None,
+                 lower_by_epoch=None, lower_by=5., min_snr=5.,
                  monitor='val_loss', mode='min'):
         self.generator = generator
-        self.lower_at = lower_at
+        self.lower_by_monitor = lower_by_monitor
+        self.lower_by_epoch = int(lower_by_epoch) if lower_by_epoch is not None else None
+        if self.lower_by_epoch is None and self.lower_by_monitor is None:
+            if lower_at is not None:
+                msg = 'The attribute `lower_at` is deprecated and will '
+                msg += 'be dropped in a future version. Please use '
+                msg += '`lower_by_epoch` or `lower_by_monitor` instead.'
+                warnings.warn(msg, DeprecationWarning)
+                if isinstance(lower_at, int):
+                    self.lower_by_epoch = lower_at
+                elif isinstance(lower_at, float):
+                    self.lower_by_monitor = lower_at
         self.lower_by = lower_by
         self.min_snr = min_snr
         self.monitor = monitor
         assert mode.lower() in ['min', 'max']
         self.mode = mode.lower()
+        self.last_update_epoch = -1
     
     def on_epoch_begin(self, epoch, logs=None):
         print("Training with target: {}".format(self.generator.target))
     
     def on_epoch_end(self, epoch, logs={}):
         lower = False
-        if isinstance(self.lower_at, int):
-            lower = (epoch > 0) and (epoch % self.lower_at == 0)
-        elif isinstance(self.lower_at, float):
+        if self.lower_by_epoch is not None:
+            lower = lower or (epoch > 0) and (epoch - self.last_update_epoch > self.lower_by_epoch)
+        if self.lower_by_monitor is not None:
             monitor = logs.get(self.monitor, 0.)
             if self.mode == 'min':
-                lower = (monitor < self.lower_at)
+                lower = lower or (monitor < self.lower_at)
             elif self.mode == 'max':
-                lower = (monitor > self.lower_at)
+                lower = lower or (monitor > self.lower_at)
             else:
                 raise RuntimeError
         if lower:
@@ -76,4 +101,5 @@ class SnrCurriculumLearningScheduler(keras.callbacks.Callback):
             else:
                 new_target = [newmin, newmax]
             self.generator.rescale(new_target)
+            self.last_update_epoch = epoch
             print('\nSet SNR of generator {} to {} on epoch {}.'.format(self.generator.__class__.__name__, new_target, epoch))

@@ -1,6 +1,7 @@
 from tensorflow import keras
 import csv
 import warnings
+import numpy as np
 
 class SensitivityEstimator(keras.callbacks.Callback):
     """A callback that monitors the sensitivity of the network.
@@ -111,7 +112,7 @@ class SensitivityEstimator(keras.callbacks.Callback):
     def on_train_end(self, logs=None):
         self.csv_file.close()
     
-    def on_train_epoch_end(self, epoch, logs=None):
+    def on_epoch_end(self, epoch, logs=None):
         epoch = epoch + 1
         if epoch % self.save_freq != 0:
             return
