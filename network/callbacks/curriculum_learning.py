@@ -85,9 +85,9 @@ class SnrCurriculumLearningScheduler(keras.callbacks.Callback):
         if self.lower_by_monitor is not None:
             monitor = logs.get(self.monitor, 0.)
             if self.mode == 'min':
-                lower = lower or (monitor < self.lower_at)
+                lower = lower or (monitor < self.lower_by_monitor)
             elif self.mode == 'max':
-                lower = lower or (monitor > self.lower_at)
+                lower = lower or (monitor > self.lower_by_monitor)
             else:
                 raise RuntimeError
         if lower:
