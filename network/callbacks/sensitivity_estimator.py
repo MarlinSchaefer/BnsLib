@@ -108,6 +108,7 @@ class SensitivityEstimator(keras.callbacks.Callback):
             header = self.header
         self.header = header
         self.csv_writer.writerow(header)
+        self.csv_file.close()
     
     def on_train_end(self, logs=None):
         self.csv_file.close()
@@ -149,6 +150,11 @@ class SensitivityEstimator(keras.callbacks.Callback):
             print([epoch] + sens + [np.mean(sens)])
     
     def write_to_file(self, epoch, sens):
+        self.csv_file = open(self.file_path, 'a')
+        self.csv_writer = self.csv_writer = csv.writer(self.csv_file, delimiter=',',
+                                     quotechar='"',
+                                     quoting=csv.QUOTE_MINIMAL)
         row = [epoch] + sens + [np.mean(sens)]
         self.csv_writer.writerow(row)
+        self.csv_file.close()
     pass
