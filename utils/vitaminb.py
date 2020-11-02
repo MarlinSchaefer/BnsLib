@@ -71,7 +71,8 @@ def params_files_from_config(params_config_file, network_config_file,
             translation[key] = key
         if key in params_content:
             if 'network_distribution' in params_content[key]:
-                params_out[params_content[key]['network_distribution']].append(translation[key])
+                dist = params_content[key]['network_distribution']
+                params_out[dist + '_pars'].append(translation[key])
             else:
                 params_out['gauss_pars'].append(translation[key])
         fixed_vals_out[translation[key]] = params_content['fixed'][key]
