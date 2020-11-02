@@ -725,6 +725,8 @@ def get_config_value(inp, constants=None, functions=None):
         elif inp[0] == '[' and inp[-1] == ']':
             #TODO: Add this functionality to ExpressionString?
             ret = []
+            if len(inp[1:-1]) == 0:
+                return ret
             parts = ['']
             in_string = False
             open_brackets = 0
@@ -754,6 +756,8 @@ def get_config_value(inp, constants=None, functions=None):
         elif inp[0] == '{' and inp[-1] == '}':
             #TODO: Add this functionality to ExpressionString?
             ret = {}
+            if len(inp[1:-1]) == 0:
+                return ret
             parts = ['']
             in_string = False
             open_brackets = 0
