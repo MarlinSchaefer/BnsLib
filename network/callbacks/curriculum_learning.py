@@ -30,6 +30,11 @@ class SnrCurriculumLearningScheduler(keras.callbacks.Callback):
         instead.
     lower_by : {float, 5.}
         The value by which the SNR should be lowered.
+    lower_strat : {'abs' or 'rel', 'abs'}
+        Whether to lower the target SNR by an absolute value ('abs') or
+        relative to the current value. If set to 'rel' the new target
+        will be `old_target * lower_by`. Thus, lower_by should be set to
+        a value between 0 and 1 in this case.
     min_snr : {float, 5.}
         The SNR-value at which the training SNR will not be lowered
         anymore.
@@ -54,7 +59,7 @@ class SnrCurriculumLearningScheduler(keras.callbacks.Callback):
     """
     def __init__(self, generator, lower_at=None, lower_by_monitor=None,
                  lower_by_epoch=None, lower_by=5., min_snr=5.,
-                 monitor='val_loss', mode='min'):
+                 monitor='val_loss', mode='min', lower_strat='abs'):
         self.generator = generator
         self.lower_by_monitor = lower_by_monitor
         self.lower_by_epoch = int(lower_by_epoch) if lower_by_epoch is not None else None
@@ -73,6 +78,8 @@ class SnrCurriculumLearningScheduler(keras.callbacks.Callback):
         self.monitor = monitor
         assert mode.lower() in ['min', 'max']
         self.mode = mode.lower()
+        assert lower_strat.lower() in ['abs', 'rel']
+        self.lower_strat = lower_strat.lower()
         self.last_update_epoch = -1
     
     def on_epoch_begin(self, epoch, logs=None):
@@ -94,8 +101,15 @@ class SnrCurriculumLearningScheduler(keras.callbacks.Callback):
             target = self.generator.target
             minsnr = safe_min(target)
             maxsnr = safe_max(target)
-            newmin = max(self.min_snr, minsnr - self.lower_by)
-            newmax = newmin + maxsnr - minsnr
+            if self.lower_strat == 'abs':
+                newmin = max(self.min_snr, minsnr - self.lower_by)
+                newmax = newmin + maxsnr - minsnr
+            elif self.lower_strat == 'rel':
+                newmin = max(self.min_snr, minsnr * self.lower_by)
+                if newmin < minsnr:
+                    newmax = newmin + (maxsnr - minsnr) * self.lower_by
+                else:
+                    newmax = maxsnr
             if newmin == newmax:
                 new_target = newmin
             else:
