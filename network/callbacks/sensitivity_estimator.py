@@ -116,7 +116,7 @@ class SensitivityEstimator(keras.callbacks.Callback):
         epoch = epoch + 1
         if epoch % self.save_freq != 0:
             return
-        old_target = self.generator_signal.target
+        old_target = self.signal_generator.target
         if self.verbose > 0:
             print("Estimating the sensitivity of the network")
         if isinstance(self.threshold, (int, float)):
