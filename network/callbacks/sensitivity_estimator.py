@@ -90,10 +90,6 @@ class SensitivityEstimator(keras.callbacks.Callback):
             self.transform = transform_function
     
     def on_train_begin(self, logs=None):
-        self.csv_file = open(self.file_path, 'w')
-        self.csv_writer = csv.writer(self.csv_file, delimiter=',',
-                                     quotechar='"',
-                                     quoting=csv.QUOTE_MINIMAL)
         if isinstance(self.header, bool) and not self.header:
             return
         if self.header is None or self.header == True:
@@ -107,11 +103,14 @@ class SensitivityEstimator(keras.callbacks.Callback):
         else:
             header = self.header
         self.header = header
-        self.csv_writer.writerow(header)
-        self.csv_file.close()
+        
+        with open(self.file_path, 'w') as fp:
+            csv_writer = csv.writer(fp, delimiter=',', quotechar='"',
+                                    quoting=csv.QUOTE_MINIMAL)
+            csv_writer.writerow(header)
     
     def on_train_end(self, logs=None):
-        self.csv_file.close()
+        return
     
     def on_epoch_end(self, epoch, logs=None):
         epoch = epoch + 1
@@ -148,13 +147,12 @@ class SensitivityEstimator(keras.callbacks.Callback):
         if self.verbose > 0:
             print(self.header)
             print([epoch] + sens + [np.mean(sens)])
+            print('')
     
     def write_to_file(self, epoch, sens):
-        self.csv_file = open(self.file_path, 'a')
-        self.csv_writer = self.csv_writer = csv.writer(self.csv_file, delimiter=',',
-                                     quotechar='"',
-                                     quoting=csv.QUOTE_MINIMAL)
-        row = [epoch] + sens + [np.mean(sens)]
-        self.csv_writer.writerow(row)
-        self.csv_file.close()
-    pass
+        with open(self.file_path, 'a') as fp:
+            csv_writer = csv.writer(self.csv_file, delimiter=',',
+                                    quotechar='"',
+                                    quoting=csv.QUOTE_MINIMAL)
+            row = [epoch] + sens + [np.mean(sens)]
+            csv_writer.writerow(row)
