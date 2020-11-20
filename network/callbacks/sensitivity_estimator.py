@@ -153,7 +153,7 @@ class SensitivityEstimator(keras.callbacks.Callback):
     
     def write_to_file(self, epoch, sens):
         with open(self.file_path, 'a') as fp:
-            csv_writer = csv.writer(self.csv_file, delimiter=',',
+            csv_writer = csv.writer(fp, delimiter=',',
                                     quotechar='"',
                                     quoting=csv.QUOTE_MINIMAL)
             row = [epoch] + sens + [np.mean(sens)]
