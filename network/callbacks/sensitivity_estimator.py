@@ -116,6 +116,7 @@ class SensitivityEstimator(keras.callbacks.Callback):
         epoch = epoch + 1
         if epoch % self.save_freq != 0:
             return
+        old_target = self.generator_signal.target
         if self.verbose > 0:
             print("Estimating the sensitivity of the network")
         if isinstance(self.threshold, (int, float)):
@@ -148,6 +149,7 @@ class SensitivityEstimator(keras.callbacks.Callback):
             print(self.header)
             print([epoch] + sens + [np.mean(sens)])
             print('')
+        self.signal_generator.rescale(old_target)
     
     def write_to_file(self, epoch, sens):
         with open(self.file_path, 'a') as fp:
