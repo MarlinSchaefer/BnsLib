@@ -74,3 +74,25 @@ def field_array_to_dict(inp):
         numpy array.
     """
     return {name: list(inp[name]) for name in inp.dtype.names}
+
+def dict_to_field_array(inp):
+    """Convert a Python dictionary to a numpy FieldArray.
+    
+    Arguments
+    ---------
+    inp : dict
+        A dictionary with structure `<name>: <list of values>`. All
+        lists must be of equal length.
+    
+    Returns
+    -------
+    numpy field array
+    """
+    assert isinstance(inp, dict)
+    keys = list(inp.keys())
+    assert all([len(inp[key]) == len(inp[keys[0]]) for key in keys])
+    out = []
+    for i in range(len(inp[keys[0]])):
+        out.append(tuple([inp[key][i] for key in keys]))
+    dtypes = [(key, np.dtype(type(out[0][i]))) for (i, key) in enumerate(keys)]
+    return np.array(out, dtype=dtypes)
