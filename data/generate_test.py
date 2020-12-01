@@ -4,15 +4,16 @@ import numpy as np
 from numpy.random import uniform, power, randint
 from pycbc.detector import Detector
 from pycbc.waveform import get_td_waveform
-from pycbc.psd import aLIGOZeroDetHighPower
+from pycbc.psd import aLIGOZeroDetHighPower, from_string
 from pycbc.noise.reproduceable import colored_noise
 from pycbc.filter import resample_to_delta_t
 
 def generate_simple_injections(file_path, duration, seed=0,
                                signal_separation=200, 
                                signal_separation_interval=20,
-                               min_mass=1.2, max_mass=1.6, f_lower=20,
-                               srate=4096, padding=256, tstart=0):
+                               min_mass=1.2, max_mass=1.6, f_lower=18,
+                               srate=4096, padding=256, tstart=0,
+                               psd_model='aLIGOZeroDetHighPower'):
     """Function that generates test data with injections.
     
     Arguments
@@ -35,10 +36,10 @@ def generate_simple_injections(file_path, duration, seed=0,
     max_mass : {float, 1.6}, optional
         The maximum mass at which injections will be made (in solar
         masses).
-    f_lower : {int or float, 20}, optional
+    f_lower : {int or float, 18}, optional
         Noise will be generated down to the specified frequency.
         Below they will be set to zero. (The waveforms are generated
-        with a lower frequency cutofff of 25 Hertz)
+        with a lower frequency cutofff of 20 Hertz)
     srate : {int, 4096}, optional
         The sample rate at which the data is generated.
     padding : {int or float, 256}, optional
@@ -46,10 +47,13 @@ def generate_simple_injections(file_path, duration, seed=0,
         contain any injections.
     tstart : {int or float, 0}, optional
         The inital time of the data.
+    psd_model : {str, 'aLIGOZeroDetHighPower'}
+        The name of the PSD-model to use to generate the noise. Must be
+        known to pycbc.psd.from_string
     
     Notes
     -----
-    -This function is part of the data-release that can be found at
+    -This function is derived from the data-release that can be found at
      https://github.com/gwastro/bns-machine-learning-search
     -Many parameters are not easy to change in this function.
      The spins are fixed to zero and the sky-location is distributed
@@ -97,7 +101,8 @@ def generate_simple_injections(file_path, duration, seed=0,
         f['mass2'] = m2
         f['seed'] = seed
     
-    p = aLIGOZeroDetHighPower(2 * int(duration * srate), 1.0/64, f_lower)
+    p = from_string(psd_model, 2 * int(duration * srate), 1.0/64,
+                    f_lower)
     
     #Generate noise
     data = {}
@@ -113,7 +118,7 @@ def generate_simple_injections(file_path, duration, seed=0,
         hp, hc = get_td_waveform(approximant="TaylorF2",
                                 mass1=m1[i], 
                                 mass2=m2[i],
-                                f_lower=25,
+                                f_lower=20,
                                 delta_t=1.0/srate,
                                 inclination=inc[i],
                                 coa_phase=cphase[i],
