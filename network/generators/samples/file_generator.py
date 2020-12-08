@@ -5,7 +5,7 @@ import numpy as np
 from one or multiple files.
 """
 
-class FileHandeler(object):
+class FileHandler(object):
     """Base class for interfacing with a single file. This class takes
     care of opening, closing, formatting and indexing.
     
@@ -42,7 +42,10 @@ class FileHandeler(object):
     def close(self):
         raise NotImplementedError
 
-class MultiFileHandeler(object):
+#To correct my earlier spelling error and keep backwards compatability
+FileHandeler = FileHandler
+
+class MultiFileHandler(object):
     """Base class for handeling multiple files at once. With this class
     the index-range or even a single index may span multiple files.
     
@@ -272,6 +275,8 @@ class MultiFileHandeler(object):
             if the FileGenerator sets use_sample_weights to True.
         """
         return inp['all']
+
+MultiFileHandeler = MultiFileHandler
 
 class FileGenerator(keras.utils.Sequence):
     """A Generator as required by Keras. It generates the samples from
