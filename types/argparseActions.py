@@ -22,8 +22,10 @@ class TypedDictAction(argparse.Action):
         for pt in values:
             split = pt.split(':')
             if len(split) == 2:
+                key, val = split
                 tmp[key] = get_config_value(val)
             elif len(split) == 3:
+                key, typ, val = split
                 tmp[key] = self.type_dict[typ](val)
             else:
                 msg = 'Argument must contain at least 2 and at most 3 '
