@@ -28,8 +28,8 @@ class TypedDictAction(argparse.Action):
             else:
                 msg = 'Argument must contain at least 2 and at most 3 '
                 msg += 'part that are separated by `:`. Received {} '
-                msg += 'arguments instead.'
-                msg = msg.format(len(split))
+                msg += 'arguments instead. ({})'
+                msg = msg.format(len(split), split)
                 raise RuntimeError(msg)
         setattr(namespace, self.dest, tmp)
 
