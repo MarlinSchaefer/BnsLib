@@ -197,7 +197,8 @@ def get_event_times(event_list):
     """
     return [event[0] for event in event_list]
 
-def get_closest_injection_times(injection_times, times):
+def get_closest_injection_times(injection_times, times,
+                                return_indices=False):
     """Return a list of the closest injection times to a list of input
     times.
     
@@ -209,6 +210,8 @@ def get_closest_injection_times(injection_times, times):
     times : iterable of floats
         A list of times. The function checks which injection time was
         closest to every single one of these times.
+    return_indices : {bool, False}
+        Return the indices of the found injection times.
     
     Returns
     -------
@@ -216,15 +219,23 @@ def get_closest_injection_times(injection_times, times):
         Returns an array containing the injection times that were
         closest to the provided times. The order is given by the order
         of the input times.
+    numpy.array of int, optional:
+        Return an array of the corresponding indices. (Only returned if
+        return_indices is true)
     """
     ret = []
+    idxs = []
     for time in times:
         idx = np.argmin(np.abs(injection_times - time))
         ret.append(injection_times[idx])
-    return np.array(ret)
+        idxs.append(idx)
+    if return_indices:
+        return np.array(ret), np.array(idxs, dtype=int)
+    else:
+        return np.array(ret)
 
 def get_missed_injection_times(event_list, injection_times,
-                               tolerance=3.):
+                               tolerance=3., return_indices=False):
     """Find the injection times that are not present in a provided list
     of events.
     
@@ -238,21 +249,32 @@ def get_missed_injection_times(event_list, injection_times,
     tolerance : {float, 3.}
         The maximum time in seconds an injection time may be away from
         an event time to be counted as a true positive.
+    return_indices : {bool, False}
+        Return the indices of the missed injection times.
     
     Returns
     -------
     numpy.array of floats:
         Returns an array containing injection times that were not
         contained in the list of events, considering the tolerance.
+    numpy.array of int, optional:
+        Return an array of the corresponding indices. (Only returned if
+        return_indices is true)
     """
     ret = []
+    idxs = []
     event_times = np.array(get_event_times(event_list))
     if len(event_times) == 0:
         return injection_times
-    for inj_time in injection_times:
+    for idx, inj_time in enumerate(injection_times):
         if np.min(np.abs(event_times - inj_time)) > tolerance:
             ret.append(inj_time)
-    return np.array(ret)
+            idxs.append(idx)
+    if return_indices:
+        return np.array(ret), np.array(idxs, dtype=int)
+    else:
+        return np.array(ret)
+    
 
 def false_alarm_rate(ts, injection_times, trigger_thresh=0.2,
                      ranking_thresh=0.5, cluster_tolerance=1.,
@@ -349,7 +371,7 @@ def sensitive_fraction(ts, injection_times, trigger_thresh=0.2,
                             tolerance=event_tolerance)
     return float(len(tp)) / len(injection_times)
 
-def filter_times(injection_times, times):
+def filter_times(injection_times, times, assume_sorted=False):
     """Returns an index array. The indices point to positions in the
     injection times the corresponding time of the times list can be
     found.
@@ -361,6 +383,9 @@ def filter_times(injection_times, times):
         present in the data.
     times : iterable of floats
         A list of times.
+    assume_sorted : {bool, False}
+        Assume that the array of injection times is sorted.
+        Significantly speeds up the filtering process.
     
     Returns
     -------
@@ -369,14 +394,32 @@ def filter_times(injection_times, times):
         the time from the times list in the injection_times array.
     """
     ret = []
-    for time in times:
-        idxs = np.where(injection_times == time)[0]
-        if len(idxs) > 0:
-            ret.append(idxs[0])
-        else:
-            msg = 'Found non-matching time {} in injection times {}.'
-            msg = msg.format(time, injection_times)
-            raise RuntimeError(msg)
+    msg = 'Found non-matching time {} in injection times {}.'
+    if assume_sorted:
+        for time in times:
+            idx = np.searchsorted(injection_times, time)
+            if idx == len(injection_times) - 1:
+                if time == injection_times[-1]:
+                    ret.append(len(injection_times)-1)
+                else:
+                    msg = msg.format(time, injection_times)
+                    raise RuntimeError(msg)
+            else:
+                if time == injection_times[idx]:
+                    ret.append(idx)
+                elif time == injection_times[idx+1]:
+                    ret.append(idx+1)
+                else:
+                    msg = msg.format(time, injection_times)
+                    raise RuntimeError(msg)
+    else:
+        for time in times:
+            idxs = np.where(injection_times == time)[0]
+            if len(idxs) > 0:
+                ret.append(idxs[0])
+            else:
+                msg = msg.format(time, injection_times)
+                raise RuntimeError(msg)
     return np.array(ret)
 
 def mchirp(m1, m2):
@@ -450,13 +493,15 @@ def sensitive_distance(ts, injection_times, injection_m1, injection_m2,
     
     tp = get_true_positives(significant_events, injection_times,
                             tolerance=event_tolerance)
-    found_times = get_closest_injection_times(injection_times,
-                                              get_event_times(tp))
-    missed_times = get_missed_injection_times(significant_events,
-                                              injection_times,
-                                              tolerance=event_tolerance)
+    found_times, found_idxs = get_closest_injection_times(injection_times,
+                                                          get_event_times(tp),
+                                                          return_indices=True)
+    #missed_times = get_missed_injection_times(significant_events,
+                                              #injection_times,
+                                              #tolerance=event_tolerance)
+    missed_idxs = np.setdiff1d(np.arange(len(injection_times)), found_idxs)
     
-    found_idxs = filter_times(injection_times, found_times)
+    #found_idxs = filter_times(injection_times, found_times)
     if len(found_idxs) > 0:
         found_m1 = injection_m1[found_idxs]
         found_m2 = injection_m2[found_idxs]
@@ -468,7 +513,7 @@ def sensitive_distance(ts, injection_times, injection_m1, injection_m2,
         found_dist = np.array([0.])
         found_mchirp = np.array([1.])
     
-    missed_idxs = filter_times(injection_times, missed_times)
+    #missed_idxs = filter_times(injection_times, missed_times)
     if len(missed_idxs) > 0:
         missed_m1 = injection_m1[missed_idxs]
         missed_m2 = injection_m2[missed_idxs]
