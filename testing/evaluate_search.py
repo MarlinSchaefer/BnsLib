@@ -104,8 +104,8 @@ def get_event_list(ts, cluster_boundaries):
     events = []
     samp_times = np.array(ts.sample_times)
     for cstart, cend in cluster_boundaries:
-        start_idx = int((cstart - ts.start_time) / ts.delta_t)
-        end_idx = int((cend - ts.start_time) / ts.delta_t)
+        start_idx = int(float(cstart - ts.start_time) / ts.delta_t)
+        end_idx = int(float(cend - ts.start_time) / ts.delta_t)
         idx = start_idx + np.argmax(ts[start_idx:end_idx+1])
         events.append((samp_times[idx], ts[idx]))
     return events
@@ -180,6 +180,37 @@ def get_true_positives(event_list, injection_times, tolerance=3.):
         if np.min(np.abs(injection_times - event[0])) <= tolerance:
             ret.append(event)
     return ret
+
+def split_true_and_false_positives(event_list, injection_times,
+                                   tolerance=3.):
+    """Find a list of correctly identified events.
+    
+    Arguments
+    ---------
+    event_list : list of tuple of float
+        A list of events as returned by get_event_list.
+    injection_times : numpy.array of floats
+        An array containing the times at which a signal was actually
+        present in the data.
+    tolerance : {float, 3.}
+        The maximum time in seconds an injection time may be away from
+        an event time to be counted as a true positive.
+    
+    Returns
+    -------
+    true_positives : list of tuples of float
+        A list of events that were correctly identified as events.
+    false_positives : list of tuples of float
+        A list of events that were falsely identified as events.
+    """
+    true_positives = []
+    false_positives = []
+    for event in event_list:
+        if np.min(np.abs(injection_times - event[0])) <= tolerance:
+            true_positives.append(event)
+        else:
+            false_positives.append(event)
+    return true_positives, false_positives
 
 def get_event_times(event_list):
     """Extract the event times from a list of events.
