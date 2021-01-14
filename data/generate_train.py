@@ -83,6 +83,7 @@ def multi_wave_worker(idx, wave_params, projection_params,
 
 def signal_worker(wave_params, projection_params, detectors, transform,
                   domain='time'):
+    tc = wave_params.pop('tc', 0.)
     if domain.lower() == 'time':
         hp, hc = get_td_waveform(**wave_params)
     elif domain.lower() == 'frequency':
@@ -90,6 +91,9 @@ def signal_worker(wave_params, projection_params, detectors, transform,
     else:
         msg = 'Domain must be either "time" or "frequency".'
         raise ValueError(msg)
+    
+    hp.start_time = float(hp.start_time) + tc
+    hc.start_time = float(hc.start_time) + tc
     
     if not isinstance(detectors, list):
         detectors = [detectors]
