@@ -211,17 +211,17 @@ class NamedPSDCache(object):
             else:
                 psd_name = list(self.psd_cache.keys())[0]
             
-            ident = (length, delta_f, low_freq_cutoff)
-            if psd_name not in self.psd_cache:
-                self.psd_cache[psd_name] = {}
-            
-            curr_cache = self.psd_cache[psd_name]
-            if ident in curr_cache:
-                return curr_cache[ident]
-            else:
-                psd = from_string(psd_name, *ident)
-                self.psd_cache[psd_name][ident] = psd
-                return psd
+        ident = (length, delta_f, low_freq_cutoff)
+        if psd_name not in self.psd_cache:
+            self.psd_cache[psd_name] = {}
+        
+        curr_cache = self.psd_cache[psd_name]
+        if ident in curr_cache:
+            return curr_cache[ident]
+        else:
+            psd = from_string(psd_name, *ident)
+            self.psd_cache[psd_name][ident] = psd
+            return psd
     
     def get_from_timeseries(self, timeseries, low_freq_cutoff,
                             psd_name=None):
