@@ -24,15 +24,42 @@ def get_trigger_times(ts, thresh):
     else:
         return np.array(ts.sample_times[idxs])
 
-def get_cluster_boundaries(trigger_times, boundarie_time=1.):
+def get_triggers(ts, thresh):
+    """Generates an array of times that exceed the given threshold.
+    
+    Arguments
+    ---------
+    ts : pycbc.TimeSeries
+        The time series to which a threshold should be applied.
+    thresh : float
+        The threshold value
+    
+    Returns
+    -------
+    numpy.array:
+        A 2D array. The row with index 0 contains the sample times where
+        the threshold was exceeded, the row with index 1 contains the
+        according values.
+    """
+    idxs = np.where(ts > thresh)[0]
+    if len(idxs) == 0:
+        return np.array([[], []])
+    else:
+        ret = np.zeros((2, len(idxs)))
+        ret[0] = np.array(ts.sample_times[idxs])
+        ret[1] = np.array(ts.data[idxs])
+        return ret
+
+def get_cluster_boundaries(triggers, boundarie_time=1.):
     """A basic clustering algorithm that generates a list start and end
     times for every cluster.
     
     Arguments
     ---------
-    trigger_times : iterable of floats
+    triggers : iterable of floats or 2D array
         A list or array containing the times of a time series that
-        exceed a given threshold. (As returned by get_trigger_times)
+        exceed a given threshold. (As returned by get_trigger_times or
+        get_triggers)
     boundarie_time : {float, 1.}
         A time in seconds around the cluster boundaries that may not
         contain any triggers for the cluster to be complete.
@@ -51,6 +78,12 @@ def get_cluster_boundaries(trigger_times, boundarie_time=1.):
     boundaries of all clusters until there are no triggers within an
     accepted range.
     """
+    if np.ndim(triggers) == 1:
+        trigger_times = triggers
+    elif np.ndim(triggers) == 2:
+        trigger_times = triggers[0]
+    else:
+        raise RuntimeError
     i = 0
     clusters = []
     current_cluster = []
@@ -108,6 +141,19 @@ def get_event_list(ts, cluster_boundaries):
         end_idx = int(float(cend - ts.start_time) / ts.delta_t)
         idx = start_idx + np.argmax(ts[start_idx:end_idx+1])
         events.append((samp_times[idx], ts[idx]))
+    return events
+
+def get_event_list_from_triggers(triggers, cluster_boundaries):
+    events = []
+    sort_idxs = np.argsort(triggers[0])
+    sorted_triggers = (triggers.T[sort_idxs]).T
+    for cstart, cend in cluster_boundaries:
+        sidx = np.searchsorted(sorted_triggers[0], cstart, side='left')
+        eidx = np.searchsorted(sorted_triggers[0], cend, side='right')
+        if sidx == eidx:
+            continue
+        idx = sidx + np.argmax(sorted_triggers[1][cstart:cend])
+        events.append((sorted_triggers[0][idx], sorted_triggers[1][idx]))
     return events
 
 def events_above_threshold(event_list, thresh):
