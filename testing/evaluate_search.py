@@ -152,7 +152,7 @@ def get_event_list_from_triggers(triggers, cluster_boundaries):
         eidx = np.searchsorted(sorted_triggers[0], cend, side='right')
         if sidx == eidx:
             continue
-        idx = sidx + np.argmax(sorted_triggers[1][cstart:cend])
+        idx = sidx + np.argmax(sorted_triggers[1][sidx:eidx])
         events.append((sorted_triggers[0][idx], sorted_triggers[1][idx]))
     return events
 

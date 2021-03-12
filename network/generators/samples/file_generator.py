@@ -59,14 +59,14 @@ class MultiFileHandler(object):
     
     Arguments
     ---------
-    file_handelers : {list of FileHandeler or None, None}
+    file_handlers : {list of FileHandeler or None, None}
         The list of FileHandelers that this class will have access to.
     mode : {str, 'r'}
         The mode in which files will be opened. (leave this as default
         if unsure of the consequences)
     """
-    def __init__(self, file_handelers=None, mode='r'):
-        self._init_file_handelers(file_handelers)
+    def __init__(self, file_handlers=None, mode='r'):
+        self._init_file_handlers(file_handlers)
         self.mode = mode
         self.input_shape = None #Shape the network expects as input
         self.output_shape = None #Shape the network expects as labels
@@ -87,8 +87,8 @@ class MultiFileHandler(object):
         index_split = self.split_index_to_groups(idx)
         for key, index in index_split.items():
             curr = False
-            for file_handeler in self.file_handeler_groups[key]:
-                if index in file_handeler:
+            for file_handler in self.file_handler_groups[key]:
+                if index in file_handler:
                     curr = True
                     break
             contains.append(curr)
@@ -97,15 +97,15 @@ class MultiFileHandler(object):
     def __enter__(self):
         """Initialization code at the beginning of a `with` statement.
         """
-        for file_handeler in self.file_handelers:
-            file_handeler.open(mode=self.mode)
+        for file_handler in self.file_handlers:
+            file_handler.open(mode=self.mode)
         return self
     
     def __exit__(self, exc_type, exc_value, exc_traceback):
         """Cleanup-code when exiting a `with` statement.
         """
-        for file_handeler in self.file_handelers:
-            file_handeler.close()
+        for file_handler in self.file_handlers:
+            file_handler.close()
     
     def __getitem__(self, idx):
         """Return the formatted item corresponding to the index.
@@ -128,9 +128,9 @@ class MultiFileHandler(object):
         ret = {}
         for key, index in split_index.items():
             ret[key] = None
-            for file_handeler in self.file_handeler_groups[key]:
-                if index in file_handeler:
-                    ret[key] = file_handeler[index]
+            for file_handler in self.file_handler_groups[key]:
+                if index in file_handler:
+                    ret[key] = file_handler[index]
         if any([val is None for val in ret.values()]):
             msg = 'The index {} was not found in any of the provided files.'
             raise IndexError(msg.format(idx))
@@ -138,18 +138,23 @@ class MultiFileHandler(object):
             return self.format_return(ret)
     
     @property
-    def file_handelers(self):
+    def file_handlers(self):
         """A list of all FileHandelers known to this MultiFileHandeler.
         """
-        return self.file_handeler_groups['all']
+        return self.file_handler_groups['all']
+    file_handelers = file_handlers
     
-    def _init_file_handelers(self, file_handelers):
+    @property
+    def file_handeler_groups(self):
+        return self.file_handler_groups
+    
+    def _init_file_handlers(self, file_handlers):
         """Initialize the dictionary of known FileHandelers and their
         corresponding groups.
         
         Arguments
         ---------
-        file_handelers : None or list of FileHandeler or dict
+        file_handlers : None or list of FileHandeler or dict
             If None, the dictionary of known FileHandelers will be
             initialized with a single, empty group called "all".
             If the argument is a list of FileHandelers the dictionary of
@@ -161,26 +166,26 @@ class MultiFileHandler(object):
             FileHandelers. All FileHandelers will be added to their
             specified group and the group "all".
         """
-        if file_handelers is None:
-            self.file_handeler_groups = {'all': []}
-        elif isinstance(file_handelers, list):
-            self.file_handeler_groups = {'all': file_handelers}
-        elif isinstance(file_handelers, dict):
-            self.file_handeler_groups = {'all': []}
-            for key in file_handelers.keys():
-                if isinstance(file_handelers[key], FileHandeler):
-                    self.add_file_handeler(file_handelers[key],
+        if file_handlers is None:
+            self.file_handler_groups = {'all': []}
+        elif isinstance(file_handlers, list):
+            self.file_handler_groups = {'all': file_handlers}
+        elif isinstance(file_handlers, dict):
+            self.file_handler_groups = {'all': []}
+            for key in file_handlers.keys():
+                if isinstance(file_handlers[key], FileHandeler):
+                    self.add_file_handler(file_handlers[key],
                                            group=key)
                 else:
-                    for file_handeler in file_handelers[key]:
-                        self.add_file_handeler(file_handeler, group=key)
+                    for file_handler in file_handlers[key]:
+                        self.add_file_handler(file_handler, group=key)
     
-    def add_file_handeler(self, file_handeler, group=None):
+    def add_file_handler(self, file_handler, group=None):
         """Add a new FileHandeler to this MultiFileHandeler.
         
         Arguments
         ---------
-        file_handeler : FileHandeler
+        file_handler : FileHandeler
             The FileHandeler that should be added.
         group : {None or hashable, None}
             The group this FileHandeler should be added to. If None the
@@ -191,23 +196,26 @@ class MultiFileHandler(object):
             added to the group "all".
         """
         if group is not None:
-            if group in self.file_handeler_groups:
-                self.file_handeler_groups[group].append(file_handeler)
+            if group in self.file_handler_groups:
+                self.file_handler_groups[group].append(file_handler)
             else:
-                self.file_handeler_groups[group] = [file_handeler]
-        self.file_handeler_groups['all'].append(file_handeler)
+                self.file_handler_groups[group] = [file_handler]
+        self.file_handler_groups['all'].append(file_handler)
+    add_file_handeler = add_file_handler
     
-    def remove_file_handeler(self, file_handeler):
+    def remove_file_handler(self, file_handler):
         """Remove a FileHandeler from the MultiFileHandeler.
         
         Arguments
         ---------
-        file_handeler : FileHandeler
+        file_handler : FileHandeler
             The FileHandeler that should be removed.
         """
-        for group in self.file_handeler_groups.values():
-            if file_handeler in group:
-                group.remove(file_handeler)
+        for group in self.file_handler_groups.values():
+            if file_handler in group:
+                group.remove(file_handler)
+    
+    remove_file_handeler = remove_file_handler
     
     def split_index_to_groups(self, idx):
         """Process an abstract index and split it into the different

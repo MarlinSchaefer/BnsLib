@@ -63,14 +63,14 @@ def multi_rate_sample(ts, samples_per_part, sample_rates, reverse=False, keep_en
      rates [400, 50]. The re-sampled time series would be of
      total duration 9s, as sampling 400 samples with a rate of
      400 yields 1s and sampling 400 samples with a rate of 50 would
-     yield 8s. The function call would be wither
+     yield 8s. The function call would be either
      multi_rate_sample(ts, 400, [400, 50])
      or
      multi_rate_sample(ts, 400, [50, 400], reverse=True)
      
      with the output
      [TimeSeries(start_time=1, end_time=9, sample_rate=50),
-      TimeSeries(start_time=9, end_time=10, sample_rate=200)]
+      TimeSeries(start_time=9, end_time=10, sample_rate=400)]
     """
     if reverse:
         sample_rates = sample_rates.copy()
