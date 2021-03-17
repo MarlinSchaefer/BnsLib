@@ -55,13 +55,20 @@ class SensitivityEstimator(keras.callbacks.Callback):
     verbose : {int, 1}
         How much information is printed during evaluation of the
         sensitivity.
+    fap : {None or int > 0, None}
+        The false-alarm probability at which the efficiency should be
+        calculated. This argument is ignored when threshold is no
+        keras.utils.Sequence. When set to None a false-alarm probability
+        of 1 / #noise samples is used. If the requested false-alarm
+        probability is smaller than 1 / #noise samples, the false-alarm
+        probability 1 / #noise samples is used.
     **kwargs : 
         Remaining keyword-arguments are passed to the base-class.
     """
     def __init__(self, signal_generator, threshold=0.5,
                  file_path='sensitivity_estimate.csv', save_freq=1,
                  transform_function=None, snrs=None, header=None,
-                 verbose=1, **kwargs):
+                 verbose=1, fap=None, **kwargs):
         super().__init__(**kwargs)
         self.signal_generator = signal_generator
         self.threshold = threshold
@@ -69,6 +76,7 @@ class SensitivityEstimator(keras.callbacks.Callback):
         self.save_freq = save_freq
         self.snrs = snrs
         self.verbose = verbose
+        self.fap = fap
         if header is None:
             self.header = None
         else:
@@ -125,7 +133,12 @@ class SensitivityEstimator(keras.callbacks.Callback):
             noise_floor = self.model.predict(self.threshold,
                                              verbose=self.verbose)
             noise_floor = self.transform(noise_floor)
-            threshold = noise_floor.max()
+            if self.fap is None or 1 / self.fap > len(noise_floor):
+                threshold = noise_floor.max()
+            else:
+                noise_floor.sort()
+                loudest_n = int(len(noise_floor) * self.fap)
+                threshold = noise_floor[-loudest_n]
         
         sens = []
         if self.snrs is None:
