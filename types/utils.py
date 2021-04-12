@@ -323,24 +323,37 @@ class DataSize(object):
     """
     dtypes = ['b', 'B', 'kb', 'kB', 'Mb', 'MB', 'Gb', 'GB', 'Tb', 'TB',
               'Pb', 'PB']
-    convert = {'b': lambda size: size // 8,
-               'B': lambda size: size,
-               'kb': lambda size: (size * 1000) // 8,
-               'kB': lambda size: size * 1000,
-               'Mb': lambda size: (1e6 * size) // 8,
-               'MB': lambda size: 1e6 * size,
-               'Gb': lambda size: (1e9 * size) // 8,
-               'GB': lambda size: 1e9 * size,
-               'Tb': lambda size: (1e12 * size) // 8,
-               'TB': lambda size: 1e12 * size,
-               'Pb': lambda size: (1e15 * size) // 8,
-               'PB': lambda size: 1e15 * size,
+    to_bytes = {'b': lambda size: size // 8,
+                'B': lambda size: size,
+                'kb': lambda size: (size * 1000) // 8,
+                'kB': lambda size: size * 1000,
+                'Mb': lambda size: (1e6 * size) // 8,
+                'MB': lambda size: 1e6 * size,
+                'Gb': lambda size: (1e9 * size) // 8,
+                'GB': lambda size: 1e9 * size,
+                'Tb': lambda size: (1e12 * size) // 8,
+                'TB': lambda size: 1e12 * size,
+                'Pb': lambda size: (1e15 * size) // 8,
+                'PB': lambda size: 1e15 * size,
                }
+    from_bytes = {'b': lambda size: size * 8,
+                  'B': lambda size: size,
+                  'kb': lambda size: int((size / 1000) * 8),
+                  'kB': lambda size: int(size / 1000),
+                  'Mb': lambda size: int((size / 1e6) * 8),
+                  'MB': lambda size: int(size / 1e6),
+                  'Gb': lambda size: int((size / 1e9) * 8),
+                  'GB': lambda size: int(size / 1e9),
+                  'Tb': lambda size: int((size / 1e12) * 8),
+                  'TB': lambda size: int(size / 1e12),
+                  'Pb': lambda size: int((size / 1e15) // 8),
+                  'PB': lambda size: int(size / 1e15),
+                 }
     def __init__(self, size, unit='B'):
         if size is None:
             self.size = None
         elif isinstance(size, type(self)):
-            self.size = self.convert[unit](size.as_bytes())
+            self.size = self.from_bytes[unit](size.as_bytes())
         else:
             assert isinstance(size, (int, float))
             self.size = size
@@ -351,10 +364,11 @@ class DataSize(object):
         if self.size is None:
             return np.inf
         else:
-            return self.convert[self.unit](self.size)
+            return self.to_bytes[self.unit](self.size)
     
-    def convert_to(self, unit):
-        return DataSize(self.convert[unit](self.as_bytes()), unit=unit)
+    def convert(self, unit):
+        return DataSize(self.from_bytes[unit](self.as_bytes()), unit=unit)
+    convert_to = convert
     
     def __lt__(self, other):
         if isinstance(other, type(self)):
@@ -408,7 +422,7 @@ class DataSize(object):
     
     def __str__(self):
         best_unit = self.get_best_unit()
-        size = self.convert[best_unit](self.as_bytes())
+        size = self.from_bytes[best_unit](self.as_bytes())
         return '%.2f %s' % (size, best_unit)
     
     def __repr__(self):
