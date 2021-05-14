@@ -228,7 +228,8 @@ def get_true_positives(event_list, injection_times, tolerance=3.):
     return ret
 
 def split_true_and_false_positives(event_list, injection_times,
-                                   tolerance=3.):
+                                   tolerance=3., assume_sorted=False,
+                                   workers=0):
     """Find a list of correctly identified events.
     
     Arguments
@@ -241,6 +242,14 @@ def split_true_and_false_positives(event_list, injection_times,
     tolerance : {float, 3.}
         The maximum time in seconds an injection time may be away from
         an event time to be counted as a true positive.
+    assume_sorted : {bool, False}
+        Assume that the injection_times are sorted in an ascending
+        order. (If this is false the injection times are sorted
+        internally)
+    workers : {int or None, 0}
+        How many processes to use to split the events. If set to 0, the
+        events are analyzed sequentially. If set to None spawns as many
+        processes as there are CPUs available.
     
     Returns
     -------
@@ -249,14 +258,72 @@ def split_true_and_false_positives(event_list, injection_times,
     false_positives : list of tuples of float
         A list of events that were falsely identified as events.
     """
-    true_positives = []
-    false_positives = []
-    for event in event_list:
-        if np.min(np.abs(injection_times - event[0])) <= tolerance:
-            true_positives.append(event)
-        else:
-            false_positives.append(event)
-    return true_positives, false_positives
+    if assume_sorted:
+        injtimes = injection_times
+    else:
+        injtimes = injection_times.copy()
+        injtimes.sort()
+
+    def worker(sub_event_list, itimes, tol, output, wid):
+        tp = []
+        fp = []
+        for event in sub_event_list:
+            t, v = event
+            idx = np.searchsorted(itimes, t, side='right')
+            if idx == 0:
+                diff = abs(t - itimes[0])
+            elif idx == len(itimes):
+                diff = abs(t - itimes[-1])
+            else:
+                diff = min(abs(t - itimes[idx-1]), abs(t - itimes[idx]))
+            if diff <= tol:
+                tp.append(event)
+            else:
+                fp.append(event)
+        output.put((wid, tp, fp))
+
+    if workers == 0:
+        queue = Queue()
+        worker(event_list, injtimes, tolerance, queue, 0)
+        _, tp, fp = queue.get()
+        return tp, fp
+    else:
+        if workers is None:
+            workers = mp.cpu_count()
+        idxsrange = int(len(event_list) // workers)
+        overhang = len(event_list) - workers * idxsrange
+        prev = 0
+        queue = mp.Queue()
+        jobs = []
+        for i in range(workers):
+            if i < overhang:
+                end = prev + idxsrange + 1
+            else:
+                end = prev + idxsrange
+            p = mp.Process(target=worker,
+                           args=(event_list[prev:end],
+                                 injtimes,
+                                 tolerance,
+                                 queue,
+                                 i))
+            prev = end
+            jobs.append(p)
+
+        for p in jobs:
+            p.start()
+
+        results = [queue.get() for p in jobs]
+
+        for p in jobs:
+            p.join()
+
+        results = sorted(results, key=lambda inp: inp[0])
+        tp = []
+        fp = []
+        for res in results:
+            tp.extend(res[1])
+            fp.extend(res[2])
+        return tp, fp
 
 def get_event_times(event_list):
     """Extract the event times from a list of events.
@@ -275,7 +342,8 @@ def get_event_times(event_list):
     return [event[0] for event in event_list]
 
 def get_closest_injection_times(injection_times, times,
-                                return_indices=False):
+                                return_indices=False,
+                                assume_sorted=False):
     """Return a list of the closest injection times to a list of input
     times.
     
@@ -289,6 +357,9 @@ def get_closest_injection_times(injection_times, times,
         closest to every single one of these times.
     return_indices : {bool, False}
         Return the indices of the found injection times.
+    assume_sorted : {bool, False}
+        Assume that the injection times are sorted in ascending order.
+        (If set to false, the injection times are sorted internally)
     
     Returns
     -------
@@ -300,12 +371,28 @@ def get_closest_injection_times(injection_times, times,
         Return an array of the corresponding indices. (Only returned if
         return_indices is true)
     """
+    if assume_sorted:
+        injtimes = injection_times
+        sidxs = np.arange(len(injtimes))
+    else:
+        sidxs = injection_times.argsort()
+        injtimes = injection_times[sidxs]
+
     ret = []
     idxs = []
-    for time in times:
-        idx = np.argmin(np.abs(injection_times - time))
-        ret.append(injection_times[idx])
-        idxs.append(idx)
+    for t in times:
+        idx = np.searchsorted(injtimes, t, side='right')
+        if idx == 0:
+            ret.append(injtimes[idx])
+            idxs.append(sidxs[idx])
+        elif idx == len(injtimes):
+            ret.append(injtimes[idx-1])
+            idxs.append(sidxs[idx-1])
+        else:
+            if abs(t - injtimes[idx-1]) < abs(t - injtimes[idx]):
+                idx -= 1
+            ret.append(injtimes[idx])
+            idxs.append(sidxs[idx])
     if return_indices:
         return np.array(ret), np.array(idxs, dtype=int)
     else:

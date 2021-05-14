@@ -98,6 +98,46 @@ def rescale_snr(signal, old_snr, new_snr):
     """
     return signal / old_snr * new_snr
 
+def rescale_signal(signal, new_snr, old_snr=None,
+                   psd='aLIGOZeroDetHighPower', low_freq_cutoff=None,
+                   high_freq_cutoff=None):
+    """Rescale a pycbc.TimeSeries or pycbc.FrequencySeries to a given
+    signal-to-noise ratio.
+    
+    Arguments
+    ---------
+    signal : pycbc.TimeSeries or pycbc.FrequencySeries
+        The data that should be rescaled.
+    new_snr : float
+        The signal-to-noise ratio the output signal should have.
+    old_snr : {float or None, None}
+        The signal-to-noise ratio of the input signal. If None the
+        optimal SNR of the signal will be calculated assuming the given
+        PSD.
+    psd : {str or None or pycbc.FrequencySeries, 'aLIGOZeroDetHighPower}
+        A power spectral density to use for the noise-model. If set to a
+        string, a power spectrum will be generated using
+        pycbc.psd.from_string. If set to None, no noise will be assumed.
+        If a frequency series is given, the user has to make sure that
+        the delta_f and length match the signal.
+    low_freq_cutoff : {float or None, None}
+        The lowest frequency to consider. If a value is given, the power
+        spectrum will be generated with a lower frequency cutoff 2 below
+        the given one. (0 at minimum)
+    high_freq_cutoff : {float or None, None}
+        The highest frequency to consider.
+    
+    Returns
+    -------
+    pycbc.TimeSeries or pycbcFrequencySeries
+        Returns the signal (same data-type as input) after rescaling.
+    """
+    if old_snr is None:
+        old_snr = optimal_snr(signal, psd=psd,
+                              low_freq_cutoff=low_freq_cutoff,
+                              high_freq_cutoff=high_freq_cutoff)
+    return rescale_snr(signal, old_snr, new_snr)
+
 def optimal_snr(signal, psd='aLIGOZeroDetHighPower',
                 low_freq_cutoff=None, high_freq_cutoff=None):
     """Calculate the optimal signal-to-noise ratio for a given signal.
