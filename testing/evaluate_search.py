@@ -1,5 +1,7 @@
 import numpy as np
 from pycbc.sensitivity import volume_montecarlo
+from queue import Queue
+import multiprocessing as mp
 
 SECONDS_PER_MONTH = 60 * 60 * 24 * 30
 
