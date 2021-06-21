@@ -112,6 +112,30 @@ def get_cluster_boundaries(triggers, boundarie_time=1.):
         clusters.append([current_cluster[0], current_cluster[0]])
     return clusters
 
+def get_cluster_boundaries_2(triggers, boundarie_time=1.):
+    if np.ndim(triggers) == 1:
+        trigger_times = np.array(triggers)
+    elif np.ndim(triggers) == 2:
+        trigger_times = np.array(triggers[0])
+    else:
+        raise RuntimeError
+    
+    diff = trigger_times[1:] - trigger_times[:-1]
+    idxs = np.where(diff > boundarie_time)[0]
+    
+    if len(idxs) == 0:
+        return [[0, len(trigger_times)]]
+    
+    diff = diff + 1
+    diff = np.concatenate([np.array([0]), diff, np.array(len(trigger_times))])
+    
+    clusters = []
+    for i in range(len(diff) - 1):
+        clusters.append([diff[i], diff[i+1]-1])
+    
+    return clusters
+    
+
 def get_event_list(ts, cluster_boundaries):
     """Turns a list of clusters into events.
     
