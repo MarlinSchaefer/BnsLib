@@ -168,13 +168,15 @@ def get_event_list_from_triggers_2(triggers, cluster_boundaries,
     # logging.info('Got left boundary')
     eidxs = np.searchsorted(sorted_triggers[0], cend, side='right')
     # logging.info('Got right boundary')
+    idxs = []
     for sidx, eidx in zip(sidxs, eidxs):
         if sidx == eidx:
             continue
         idx = sidx + np.argmax(sorted_triggers[1][sidx:eidx])
-        events.append((sorted_triggers[0][idx], sorted_triggers[1][idx]))
+        idxs.append(idx)
+    idxs = np.array(idxs)
     # logging.info('After loop')
-    return events
+    return sorted_triggers.T[idxs]
 
 def events_above_threshold(event_list, thresh):
     """Filter events by a threshold on their value.
