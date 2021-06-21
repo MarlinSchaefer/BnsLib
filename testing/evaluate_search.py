@@ -184,7 +184,7 @@ def get_event_list_from_triggers_2(triggers, cluster_boundaries,
                 return
             return sidx + np.argmax(vals[sidx:eidx])
         with mp.Pool(processes=workers) as pool:
-            idxs = pool.starmap(zip(sidxs, eidxs, repeat(sorted_triggers[1])))
+            idxs = pool.starmap(get_idx, zip(sidxs, eidxs, repeat(sorted_triggers[1])))
         idxs = [pt for pt in idxs if pt is not None]
     idxs = np.array(idxs)
     # logging.info('After loop')
