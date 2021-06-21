@@ -135,7 +135,7 @@ def get_cluster_boundaries_2(triggers, boundarie_time=1.):
     
     clusters = []
     for i in range(len(idxs) - 1):
-        clusters.append([trigger_times[idxs[i]], trigger_times[idxs[i+1]]-1])
+        clusters.append([trigger_times[idxs[i]], trigger_times[idxs[i+1]-1]])
     
     return clusters
     
