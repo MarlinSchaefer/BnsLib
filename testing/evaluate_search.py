@@ -2,6 +2,7 @@ import numpy as np
 from pycbc.sensitivity import volume_montecarlo
 from queue import Queue
 import multiprocessing as mp
+import logging
 
 SECONDS_PER_MONTH = 60 * 60 * 24 * 30
 
@@ -81,51 +82,14 @@ def get_cluster_boundaries(triggers, boundarie_time=1.):
     accepted range.
     """
     if np.ndim(triggers) == 1:
-        trigger_times = triggers
-    elif np.ndim(triggers) == 2:
-        trigger_times = triggers[0]
-    else:
-        raise RuntimeError
-    i = 0
-    clusters = []
-    current_cluster = []
-    while i < len(trigger_times):
-        if len(current_cluster) == 0:
-            current_cluster.append(trigger_times[i])
-        elif len(current_cluster) == 1:
-            if trigger_times[i] - current_cluster[0] < boundarie_time:
-                current_cluster.append(trigger_times[i])
-            else:
-                current_cluster.append(current_cluster[0])
-                clusters.append(current_cluster)
-                current_cluster = [trigger_times[i]]
-        elif len(current_cluster) == 2:
-            if trigger_times[i] - current_cluster[1] < boundarie_time:
-                current_cluster[1] = trigger_times[i]
-            else:
-                clusters.append(current_cluster)
-                current_cluster = [trigger_times[i]]
-        i += 1
-    if len(current_cluster) == 2:
-        clusters.append(current_cluster)
-    elif len(current_cluster) == 1:
-        clusters.append([current_cluster[0], current_cluster[0]])
-    return clusters
-
-def get_cluster_boundaries_2(triggers, boundarie_time=1.):
-    if np.ndim(triggers) == 1:
         trigger_times = np.array(triggers)
     elif np.ndim(triggers) == 2:
         trigger_times = np.array(triggers[0])
     else:
         raise RuntimeError
     
-    print(f"Shape of trigger times: {trigger_times.shape}")
-    
     diff = trigger_times[1:] - trigger_times[:-1]
-    print(f"Shape of diff: {diff.shape}")
     idxs = np.where(diff > boundarie_time)[0]
-    print(f"Shape of idxs: {idxs.shape}")
     
     if len(idxs) == 0:
         return [[0, len(trigger_times)]]
@@ -199,13 +163,17 @@ def get_event_list_from_triggers_2(triggers, cluster_boundaries,
         sort_idxs = np.argsort(triggers[0])
         sorted_triggers = (triggers.T[sort_idxs]).T
     cstart, cend = np.array(cluster_boundaries).T
+    logging.info('Before searching')
     sidxs = np.searchsorted(sorted_triggers[0], cstart, side='left')
+    logging.info('Got left boundary')
     eidxs = np.searchsorted(sorted_triggers[0], cend, side='right')
+    logging.info('Got right boundary')
     for sidx, eidx in zip(sidxs, eidxs):
         if sidx == eidx:
             continue
         idx = sidx + np.argmax(sorted_triggers[1][sidx:eidx])
         events.append((sorted_triggers[0][idx], sorted_triggers[1][idx]))
+    logging.info('After loop')
     return events
 
 def events_above_threshold(event_list, thresh):
