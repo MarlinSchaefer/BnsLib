@@ -120,18 +120,22 @@ def get_cluster_boundaries_2(triggers, boundarie_time=1.):
     else:
         raise RuntimeError
     
+    print(f"Shape of trigger times: {trigger_times.shape}")
+    
     diff = trigger_times[1:] - trigger_times[:-1]
+    print(f"Shape of diff: {diff.shape}")
     idxs = np.where(diff > boundarie_time)[0]
+    print(f"Shape of idxs: {idxs.shape}")
     
     if len(idxs) == 0:
         return [[0, len(trigger_times)]]
     
-    diff = diff + 1
-    diff = np.concatenate([np.array([0]), diff, np.array(len(trigger_times))])
+    idxs = idxs + 1
+    idxs = np.concatenate([np.array([0]), idxs, np.array(len(trigger_times))])
     
     clusters = []
-    for i in range(len(diff) - 1):
-        clusters.append([diff[i], diff[i+1]-1])
+    for i in range(len(idxs) - 1):
+        clusters.append([trigger_times[idxs[i]], trigger_times[idxs[i+1]]-1])
     
     return clusters
     
