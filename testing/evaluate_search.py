@@ -145,13 +145,35 @@ def get_event_list(ts, cluster_boundaries):
         events.append((samp_times[idx], ts[idx]))
     return events
 
-def get_event_list_from_triggers(triggers, cluster_boundaries):
+def get_event_list_from_triggers(triggers, cluster_boundaries,
+                                 assume_sorted=False):
     events = []
-    sort_idxs = np.argsort(triggers[0])
-    sorted_triggers = (triggers.T[sort_idxs]).T
+    if assume_sorted:
+        sorted_triggers = triggers
+    else:
+        sort_idxs = np.argsort(triggers[0])
+        sorted_triggers = (triggers.T[sort_idxs]).T
     for cstart, cend in cluster_boundaries:
         sidx = np.searchsorted(sorted_triggers[0], cstart, side='left')
         eidx = np.searchsorted(sorted_triggers[0], cend, side='right')
+        if sidx == eidx:
+            continue
+        idx = sidx + np.argmax(sorted_triggers[1][sidx:eidx])
+        events.append((sorted_triggers[0][idx], sorted_triggers[1][idx]))
+    return events
+
+def get_event_list_from_triggers_2(triggers, cluster_boundaries,
+                                   assume_sorted=False):
+    events = []
+    if assume_sorted:
+        sorted_triggers = triggers
+    else:
+        sort_idxs = np.argsort(triggers[0])
+        sorted_triggers = (triggers.T[sort_idxs]).T
+    cstart, cend = np.array(cluster_boundaries).T
+    sidxs = np.searchsorted(sorted_triggers[0], cstart, side='left')
+    eidxs = np.searchsorted(sorted_triggers[0], cend, side='right')
+    for sidx, eidx in zip(sidxs, eidxs):
         if sidx == eidx:
             continue
         idx = sidx + np.argmax(sorted_triggers[1][sidx:eidx])
