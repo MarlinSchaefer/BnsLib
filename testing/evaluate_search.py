@@ -131,7 +131,7 @@ def get_cluster_boundaries_2(triggers, boundarie_time=1.):
         return [[0, len(trigger_times)]]
     
     idxs = idxs + 1
-    idxs = np.concatenate([np.array([0]), idxs, np.array(len(trigger_times))])
+    idxs = np.concatenate([np.array([0]), idxs, np.array([len(trigger_times)])])
     
     clusters = []
     for i in range(len(idxs) - 1):
