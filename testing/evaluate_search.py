@@ -7,6 +7,11 @@ from itertools import repeat
 
 SECONDS_PER_MONTH = 60 * 60 * 24 * 30
 
+def get_idx(sidx, eidx, vals):
+    if sidx == eidx:
+        return
+    return sidx + np.argmax(vals[sidx:eidx])
+
 def get_trigger_times(ts, thresh):
     """Generates an array of times that exceed the given threshold.
     
@@ -179,10 +184,6 @@ def get_event_list_from_triggers_2(triggers, cluster_boundaries,
             idx = sidx + np.argmax(sorted_triggers[1][sidx:eidx])
             idxs.append(idx)
     else:
-        def get_idx(sidx, eidx, vals):
-            if sidx == eidx:
-                return
-            return sidx + np.argmax(vals[sidx:eidx])
         with mp.Pool(processes=workers) as pool:
             idxs = pool.starmap(get_idx, zip(sidxs, eidxs, repeat(sorted_triggers[1])))
         idxs = [pt for pt in idxs if pt is not None]
