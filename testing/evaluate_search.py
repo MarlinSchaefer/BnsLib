@@ -3,6 +3,7 @@ from pycbc.sensitivity import volume_montecarlo
 from queue import Queue
 import multiprocessing as mp
 import logging
+from itertools import repeat
 
 SECONDS_PER_MONTH = 60 * 60 * 24 * 30
 
@@ -155,7 +156,9 @@ def get_event_list_from_triggers(triggers, cluster_boundaries,
     return events
 
 def get_event_list_from_triggers_2(triggers, cluster_boundaries,
-                                   assume_sorted=False):
+                                   assume_sorted=False, workers=1):
+    if workers < 0:
+        workers = mp.cpu_count()
     events = []
     if assume_sorted:
         sorted_triggers = triggers
@@ -169,11 +172,20 @@ def get_event_list_from_triggers_2(triggers, cluster_boundaries,
     eidxs = np.searchsorted(sorted_triggers[0], cend, side='right')
     # logging.info('Got right boundary')
     idxs = []
-    for sidx, eidx in zip(sidxs, eidxs):
-        if sidx == eidx:
-            continue
-        idx = sidx + np.argmax(sorted_triggers[1][sidx:eidx])
-        idxs.append(idx)
+    if workers == 1:
+        for sidx, eidx in zip(sidxs, eidxs):
+            if sidx == eidx:
+                continue
+            idx = sidx + np.argmax(sorted_triggers[1][sidx:eidx])
+            idxs.append(idx)
+    else:
+        def get_idx(sidx, eidx, vals):
+            if sidx == eidx:
+                return
+            return sidx + np.argmax(vals[sidx:eidx])
+        with mp.Pool(processes=workers) as pool:
+            idxs = pool.map(zip(sidxs, eidxs, repeat(sorted_triggers[1])))
+        idxs = [pt for pt in idxs if pt is not None]
     idxs = np.array(idxs)
     # logging.info('After loop')
     return sorted_triggers.T[idxs]
