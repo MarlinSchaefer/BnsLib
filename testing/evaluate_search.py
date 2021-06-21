@@ -163,17 +163,17 @@ def get_event_list_from_triggers_2(triggers, cluster_boundaries,
         sort_idxs = np.argsort(triggers[0])
         sorted_triggers = (triggers.T[sort_idxs]).T
     cstart, cend = np.array(cluster_boundaries).T
-    logging.info('Before searching')
+    # logging.info('Before searching')
     sidxs = np.searchsorted(sorted_triggers[0], cstart, side='left')
-    logging.info('Got left boundary')
+    # logging.info('Got left boundary')
     eidxs = np.searchsorted(sorted_triggers[0], cend, side='right')
-    logging.info('Got right boundary')
+    # logging.info('Got right boundary')
     for sidx, eidx in zip(sidxs, eidxs):
         if sidx == eidx:
             continue
         idx = sidx + np.argmax(sorted_triggers[1][sidx:eidx])
         events.append((sorted_triggers[0][idx], sorted_triggers[1][idx]))
-    logging.info('After loop')
+    # logging.info('After loop')
     return events
 
 def events_above_threshold(event_list, thresh):
