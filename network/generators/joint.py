@@ -41,3 +41,23 @@ class JointGenerator(keras.utils.Sequence):
         if genidx > 0:
             index -= self.cumlen[genidx-1]
         return self.generators[genidx][index]
+
+class MultiInputGenerator(keras.utils.Sequence):
+    """A generator that takes multiple generators as inputs and combines
+    their outputs into a list.
+    
+    Useful to combine single input generators into one multi-input
+    generator.
+    """
+    def __init__(self, *generators):
+        self.generators = generators
+    
+    def __len__(self):
+        return min([len(gen) for gen in self.generators])
+    
+    def __getitem__(self, index):
+        return [gen.__getitem__(index) for gen in self.generators]
+    
+    def on_epoch_end(self):
+        for gen in self.generators:
+            gen.on_epoch_end()
