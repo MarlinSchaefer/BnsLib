@@ -3,8 +3,10 @@ from tensorflow import keras
 from tensorflow.keras.layers import Conv1D, MaxPooling1D, Layer
 from tensorflow.keras import backend as K
 from tensorflow.python.ops import nn
-from tensorflow.keras.engine.base_layer import InputSpec
+from tensorflow.python.keras.engine.base_layer import input_spec
 import numpy as np
+
+InputSpec = input_spec.InputSpec
 
 class BaseInception1D(object):
     """A class that implements a 1D inception module. Strictly speaking,
