@@ -4,6 +4,8 @@ import sys
 import numpy as np
 from pycbc.psd import from_string
 
+from BnsLib.utils import get_psd
+
 class DictList(object):
     """A table-like object. It is a dictionary where each value is a
     list.
@@ -219,7 +221,10 @@ class NamedPSDCache(object):
         if ident in curr_cache:
             return curr_cache[ident]
         else:
-            psd = from_string(psd_name, *ident)
+            psd = get_psd(psd_name,
+                          flen=ident[0],
+                          delta_f=ident[1],
+                          low_freq_cutoff=ident[2])
             self.psd_cache[psd_name][ident] = psd
             return psd
     
