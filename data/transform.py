@@ -221,3 +221,23 @@ def optimal_network_snr(signals, psds='aLIGOZeroDetHighPower',
                                 low_freq_cutoff=low_freq_cutoffs[i],
                                 high_freq_cutoff=high_freq_cutoffs[i]))
     return np.sqrt(np.sum(np.square(snrs)))
+
+def number_segments(length, segment_size, strides):
+    """Calculate the number of window positions in a longer data stream.
+    
+    Arguments
+    ---------
+    length : int
+        The length of the data.
+    segment_size : int
+        The size of the window in samples.
+    strides : int
+        The stride-size in samples.
+    
+    Returns
+    -------
+    int:
+        The number of windows the data can be tiled into with the given
+        window (segment) size and stride.
+    """
+    return (length - segment_size) // strides + 1

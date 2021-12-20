@@ -582,3 +582,187 @@ class LimitedSizeDict(OrderedDict):
             dictionary.
         """
         return self._remaining_size >= memsize(value)
+
+class MultiArrayIndexer(object):
+    """An object to simplify accessing multiple consecutive
+    arrays/lists/indexed objects.
+    
+    This object is useful when multiple different objects storing
+    consecutive data are accessed. The indexer returns the boundary
+    indices for the individual indexed objects when a slice of the
+    concatenated data is requested.
+    
+    If you want to retrieve the values directly rather than getting just
+    the indices, use IndexedConcatenate instead.
+    
+    Example
+    -------
+    >>> a = [1, 2, 3]
+    >>> b = [4, 5, 6]
+    >>> c = [7, 8, 9]
+    >>> indexer = MultiArrayIndexer(a, b, c)
+    >>> indexer[1:5]
+        {0: (1, 3), 1: (0, 2)}
+    >>> indexer[1:8]
+        {0: (1, 3), 1: (0, 3), 2: (0, 2)}
+    
+    Arguments
+    ---------
+    lengths : ints or objects with __len__ attribute
+        Either the length of the objects to add or the objects
+        themselves. They are in the order as they are provided. May be
+        a combination of lengths and indexed objects.
+    """
+    def __init__(self, *lengths):
+        self.lengths = [0]
+        self.cumlen = [0]
+        self.names = [None]
+        for length in lengths:
+            self.add_array_or_length(length)
+    
+    def add_length(self, length, name=None):
+        assert name is None or isinstance(name, str)
+        assert isinstance(length, int) and length > 0
+        self.lengths.append(length)
+        self.cumlen.append(self.cumlen[-1] + length)
+        self.names.append(name)
+    
+    def add_array(self, array, name=None):
+        self.add_length(len(array), name=name)
+    
+    def add_array_or_length(self, item, name=None):
+        if hasattr(item, '__len__'):
+            self.add_array(item, name=name)
+        elif isinstance(item, int):
+            self.add_length(item, name=name)
+        else:
+            raise TypeError
+    
+    def remove_length(self, idx):
+        del self.cumlen[i]
+        name = self._name_of_index(idx)
+        del self.names[idx]
+        length = self.lengths.pop(idx)
+        self.recompute_cumlen()
+        return name, length
+    
+    def recompute_cumlen(self):
+        cumlen = [0]
+        for l in self.lengths:
+            cumlen.append(cumlen[-1] + l)
+        self.cumlen = cumlen
+    
+    def __len__(self):
+        return self.cumlen[-1]
+    
+    def _get_index_value_pair(self, idx):
+        assert isinstance(idx, int)
+        index = np.searchsorted(self.cumlen, idx, side='right')
+        assert index > 0, f"Got index {index} for idx {idx}"
+        if index >= len(self.lengths):
+            raise IndexError
+        return index, idx - self.cumlen[index-1]
+    
+    def _name_of_index(self, index, replace_names=True):
+        if not replace_names:
+            return index - 1
+        if self.names[index] is not None:
+            name = self.names[index]
+        else:
+            name = index - 1
+        return name
+    
+    def _sanitize_int(self, idx):
+        assert isinstance(idx, int)
+        if idx < 0:
+            idx = len(self) + idx
+        if idx < 0:
+            raise IndexError('Index out of range [too small]')
+        return idx
+    
+    def __getitem__(self, idx):
+        return self.get(idx)
+    
+    def get(self, start, stop=None, replace_names=True):
+        if isinstance(start, slice):
+            assert stop is None
+            idx = start
+        elif stop is not None:
+            assert isinstance(start, int)
+            assert start < stop
+            assert start >= 0
+            idx = slice(start, stop)
+        else:
+            idx = start
+        if isinstance(idx, int):
+            idx = self._sanitize_int(idx)
+            index, val = self._get_index_value_pair(idx)
+            name = self._name_of_index(index,
+                                       replace_names=replace_names)
+            return {name: val}
+        elif isinstance(idx, slice):
+            assert idx.step is None, "Only full slices are supported"
+            start = idx.start if idx.start is not None else 0
+            stop = idx.stop if idx.stop is not None else len(self)
+            start = self._sanitize_int(start)
+            stop = self._sanitize_int(stop)
+            stop -= 1
+            assert stop > -1
+            startidx, startval = self._get_index_value_pair(start)
+            stopidx, stopval = self._get_index_value_pair(stop)
+            stopval += 1
+            if startidx == stopidx:
+                name = self._name_of_index(startidx,
+                                           replace_names=replace_names)
+                return {name: (startval, stopval)}
+            res = {}
+            for index in range(startidx, stopidx + 1):
+                name = self._name_of_index(index,
+                                           replace_names=replace_names)
+                if index == startidx:
+                    res[name] = (startval, self.lengths[index])
+                elif index == stopidx:
+                    res[name] = (0, stopval)
+                else:
+                    res[name] = (0, self.lengths[index])
+            return res
+
+class IndexedConcatenate(object):
+    def __init__(self, *arrays):
+        self.indexer = MultiArrayIndexer()
+        self.arrays = []
+        for array in arrays:
+            self.add_array(array)
+    
+    def recompute_indexer(self):
+        self.indexer = MultiArrayIndexer()
+        for array in self.arrays:
+            self.indexer.add_array(array)
+    
+    def add_array(self, array):
+        if not hasattr(array, '__len__'):
+            raise TypeError
+        self.arrays.append(array)
+        self.indexer.add_array(array)
+    
+    def drop_array(self, idx):
+        self.indexer.remove_length(idx)
+        return self.arrays.pop(idx)
+    
+    def get(self, start, stop=None, squeeze=False, recompute=True):
+        if recompute:
+            self.recompute_indexer()
+        indices = self.indexer.get(start, stop=stop, replace_names=False)
+        ret = []
+        for i in sorted(indices):
+            if hasattr(indices[i], '__len__') and len(indices[i]) == 2:
+                sidx, eidx = indices[i]
+                ret.append(self.arrays[i][sidx:eidx])
+            else:
+                ret.append(self.arrays[i][indices[i]])
+        if squeeze and len(indices) == 1:
+            return ret[0]
+        return ret
+    
+    def __getitem__(self, index):
+        return self.get(index)
