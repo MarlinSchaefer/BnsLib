@@ -3,6 +3,7 @@ import numpy as np
 from pycbc.types import load_frequencyseries, FrequencySeries
 from pycbc.psd import from_string, from_numpy_arrays, interpolate
 
+
 def apply_low_freq_cutoff(freqseries, low_freq_cutoff):
     if low_freq_cutoff is None:
         return freqseries
@@ -10,10 +11,12 @@ def apply_low_freq_cutoff(freqseries, low_freq_cutoff):
     freqseries[:idx] = 0
     return freqseries
 
+
 def apply_delta_f(freqseries, delta_f):
     if delta_f is None:
         return freqseries
     return interpolate(freqseries, delta_f)
+
 
 def load_psd_file(path, flen=None, delta_f=None, low_freq_cutoff=None,
                   is_asd_file=False):
@@ -37,8 +40,8 @@ def load_psd_file(path, flen=None, delta_f=None, low_freq_cutoff=None,
     except ValueError:
         file_data = np.loadtxt(path)
         if (file_data < 0).any() or \
-            numpy.logical_not(numpy.isfinite(file_data)).any():
-            raise ValueError('Invalid data in ' + filename)
+           np.logical_not(np.isfinite(file_data)).any():
+            raise ValueError('Invalid data in ' + path)
 
         freq_data = file_data[:, 0]
         noise_data = file_data[:, 1]
@@ -54,6 +57,7 @@ def load_psd_file(path, flen=None, delta_f=None, low_freq_cutoff=None,
         psd = from_numpy_arrays(freq_data, noise_data, flen, delta_f,
                                 low_freq_cutoff)
     return psd
+
 
 def get_psd(psd, flen=None, delta_f=None, low_freq_cutoff=None,
             is_asd=False):
@@ -79,18 +83,20 @@ def get_psd(psd, flen=None, delta_f=None, low_freq_cutoff=None,
     if isinstance(psd, str):
         if os.path.isfile(psd):
             try:
-                psd = load_psd_file(psd,flen=flen, delta_f=delta_f,
+                psd = load_psd_file(psd, flen=flen, delta_f=delta_f,
                                     low_freq_cutoff=low_freq_cutoff,
                                     is_asd_file=is_asd)
             except (ValueError, OSError):
                 if flen is None or delta_f is None or \
-                    low_freq_cutoff is None:
-                    raise ValueError(f'Must provide flen, delta_f and low_freq_cutoff.')
+                   low_freq_cutoff is None:
+                    msg = 'Must provide flen, delta_f and low_freq_cutoff.'
+                    raise ValueError(msg)
                 psd = from_string(psd, flen, delta_f, low_freq_cutoff)
         else:
             if flen is None or delta_f is None or \
-                low_freq_cutoff is None:
-                raise ValueError(f'Must provide flen, delta_f and low_freq_cutoff.')
+               low_freq_cutoff is None:
+                msg = 'Must provide flen, delta_f and low_freq_cutoff.'
+                raise ValueError(msg)
             psd = from_string(psd, flen, delta_f, low_freq_cutoff)
     elif isinstance(psd, FrequencySeries):
         if is_asd:

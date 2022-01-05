@@ -728,6 +728,21 @@ class MultiArrayIndexer(object):
             return res
 
 class IndexedConcatenate(object):
+    """This class is a wrapper around MultiArrayIndexer that allows for
+    direct access of the data.
+    
+    Arguments
+    ---------
+    *arrays : objects with __len__ attribute
+        The arrays that should be accessed subsequently.
+    
+    Examples
+    --------
+    >>> from BnsLib.types import IndexedConcatenate
+    >>> conc = IndexedConcatenate([1, 2, 3], [4, 5, 6])+
+    >>> conc[:4]
+        [[1, 2, 3], [4]]
+    """
     def __init__(self, *arrays):
         self.indexer = MultiArrayIndexer()
         self.arrays = []
