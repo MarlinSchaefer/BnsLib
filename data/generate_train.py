@@ -1,21 +1,24 @@
 import numpy as np
 from pycbc.waveform import get_td_waveform, get_fd_waveform
 from BnsLib.utils.formatting import input_to_list, list_length
-from functools import wraps
 from pycbc.detector import Detector
-import warnings
 from BnsLib.utils.progress_bar import progress_tracker, mp_progress_tracker
-from BnsLib.types.utils import DictList, MPCounter
+from BnsLib.types.utils import DictList, NamedPSDCache
 import multiprocessing as mp
 from pycbc.types import TimeSeries
-import datetime
-from pycbc.noise import noise_from_string
+import pycbc.noise.reproduceable
 from BnsLib.data.transform import whiten
 import time
+from pycbc.workflow import WorkflowConfigParser
+from pycbc.distributions import read_params_from_config
+from pycbc.distributions import read_distributions_from_config
+from pycbc.distributions import read_constraints_from_config
+from pycbc.distributions import JointDistribution
+from pycbc.transforms import read_transforms_from_config, apply_transforms
+
 
 def multi_wave_worker(idx, wave_params, projection_params,
-                      detector_names, transform, domain, progbar,
-                      output):
+                      detector_names, transform, domain, progbar, pipe):
     """A helper-function to generate multiple waveforms using
     multiprocessing.
     
@@ -49,12 +52,8 @@ def multi_wave_worker(idx, wave_params, projection_params,
     progbar : BnsLib.utils.progress_bar.mp_progress_tracker or None
         If a progress bar is desired, the instance can be passed here.
         When set to None, no progress will be reported.
-    output : multiprocessing.Queue
-        The Queue into which the outputs of the waveform generating code
-        will be inserted. Contents are of the form:
-        (index, data)
-        Here `data` is a dictionary. The keys are the different detector
-        names and the values are lists storing the generated waveforms.
+    pipe : {None or multiprocessing Pipe, None}
+        The pipe to use for communication with the main process.
     
     Returns
     -------
@@ -65,24 +64,30 @@ def multi_wave_worker(idx, wave_params, projection_params,
     else:
         detectors = [Detector(det) for det in detector_names]
     ret = DictList()
-    for wav_params, proj_params in zip(wave_params, projection_params):
+    
+    for i, (wav_params, proj_params) in enumerate(zip(wave_params,
+                                                      projection_params)):
         sig = signal_worker(wav_params,
                             proj_params,
                             detectors,
                             transform,
-                            domain=domain)
+                            domain=domain,
+                            pidx=idx,
+                            i=i,
+                            pipe=pipe)
         for key, val in sig.items():
             if key in ret:
                 ret.append(key, value=val)
             else:
                 ret.append(key, value=[val])
-        #ret.append(ret)
         if progbar is not None:
             progbar.iterate()
-    output.put((idx, ret.as_dict()))
+    pipe.send(['output', [idx, ret.as_dict()], {}])
+    pipe.send(['stop', [], {}])
+
 
 def signal_worker(wave_params, projection_params, detectors, transform,
-                  domain='time'):
+                  domain='time', pidx=None, i=None, pipe=None):
     tc = wave_params.pop('tc', 0.)
     if domain.lower() == 'time':
         hp, hc = get_td_waveform(**wave_params)
@@ -104,7 +109,6 @@ def signal_worker(wave_params, projection_params, detectors, transform,
     else:
         st = float(hp.start_time)
         projection_params.append(st)
-        #print(projection_params)
         req_opt = [np.isnan(pt) for pt in projection_params[:2]]
         if any(req_opt):
             opt_ra, opt_dec = detectors[0].optimal_orientation(st)
@@ -114,33 +118,84 @@ def signal_worker(wave_params, projection_params, detectors, transform,
                 projection_params[1] = opt_dec
         for det in detectors:
             fp, fc = det.antenna_pattern(*projection_params)
-            ret[det.name] = transform(fp * hp + fc * hc)
+            try:
+                ret[det.name] = transform(fp * hp + fc * hc, pidx=pidx,
+                                          i=i, wave_params=wave_params,
+                                          projection_params=projection_params,
+                                          pipe=pipe)
+            # * Legacy support for transform without arguments for
+            # - process-index, parameter-index, parameters and pipe.
+            except TypeError:
+                ret[det.name] = transform(fp * hp + fc * hc)
     return ret
 
-def multi_noise_worker(length, delta_t, psd_name, flow, number, seed,
-                       transform, bar, output):
+
+def multi_noise_worker(pidx, length, delta_t, psd_name, flow, number,
+                       seed, transform, bar, pipe):
     ret = []
+    rs = np.random.RandomState(seed)
     if psd_name.lower() == 'simple':
-        sample_rate = int(1. / delta_t)
         nyquist = int(1. / (2 * delta_t))
         scale = np.sqrt(nyquist)
-        total_noise = np.random.normal(loc=0., scale=scale,
-                                       size=(number, length))
+        total_noise = rs.normal(loc=0., scale=scale,
+                                size=(number, length))
         for noise in total_noise:
             ret.append(transform(TimeSeries(noise, delta_t=delta_t)))
             if bar is not None:
                 bar.iterate()
     else:
-        np.random.seed(seed)
-        seeds = np.random.randint(0, 1e7, size=number, dtype=int)
-        for i in range(number): 
-            noise = noise_from_string(psd_name, length, delta_t,
-                                      seed=int(seeds[i]),
-                                      low_frequency_cutoff=flow)
-            ret.append(transform(noise))
+        seeds = rs.randint(0, 1e7, size=number, dtype=int)
+        duration = length * delta_t
+        delta_f = 1. / duration
+        sample_rate = int(1. / delta_t)
+        flen = length // 2 + 1
+        for i in range(number):
+            pipe.send(['get_psd',
+                      [flen, delta_f, flow],
+                      {'psd_name': psd_name}])
+            psd = pipe.recv()
+            noise = pycbc.noise.reproduceable.colored_noise(psd,
+                                                            0,
+                                                            duration,
+                                                            seed=int(seeds[i]),
+                                                            sample_rate=sample_rate,
+                                                            low_frequency_cutoff=flow)
+            try:
+                noise = transform(noise, pidx=pidx, i=i, pipe=pipe)
+            except TypeError:
+                noise = transform(noise)
+            ret.append(noise)
             if bar is not None:
                 bar.iterate()
-    output.put(ret)
+    # output.put(ret)
+    pipe.send(['output', [pidx, ret], {}])
+    pipe.send(['stop', [], {}])
+
+
+class PipeStub(object):
+    def __init__(self, flags):
+        self.content = []
+        self.flags = flags
+    
+    def send(self, msg):
+        flag, args, kwargs = msg
+        if flag == 'output':
+            self.content.append(msg)
+        elif flag == 'stop':
+            self.content.append(msg)
+        elif flag in self.flags:
+            content, _ = self.flags[flag](*args, **kwargs)
+            self.content.append(content)
+    
+    def recv(self):
+        ret = None
+        if len(self.content) > 0:
+            ret = self.content.pop(0)
+        return ret
+    
+    def poll(self):
+        return len(self.content) > 0
+
 
 class WaveformGetter(object):
     """Class to generate waveforms from given parameters. It can only
@@ -189,8 +244,8 @@ class WaveformGetter(object):
     >>> static_params['ra'] = numpy.pi
     >>> static_params['dec'] = numpy.pi / 2
     >>> static_params['distance'] = 1000.
-    >>> getter = WaveformGetter(variable_params=variable_params,\
-    >>>                         static_params=static_params,\
+    >>> getter = WaveformGetter(variable_params=variable_params,\\
+    >>>                         static_params=static_params,\\
     >>>                         detectors=['H1', 'L1'])
     >>> waves = getter.generate(verbose=False)
     """
@@ -201,6 +256,7 @@ class WaveformGetter(object):
         self.domain = domain
         self.detectors = detectors
         self._it_index = 0
+        self.flags = {}
     
     def __len__(self):
         if len(self.variable_params) == 0:
@@ -277,7 +333,7 @@ class WaveformGetter(object):
         
         indices = list(range(*index.indices(len(self))))
         
-        #create input to signal worker
+        # create input to signal worker
         wave_params = []
         projection_params = []
         for i in indices:
@@ -314,7 +370,7 @@ class WaveformGetter(object):
         else:
             detector_names = [det.name for det in self.detectors]
         
-        #Generate the signals
+        # Generate the signals
         if workers == 0:
             if verbose:
                 progbar = progress_tracker(len(wave_params),
@@ -323,13 +379,19 @@ class WaveformGetter(object):
                 detectors = None
             else:
                 detectors = [Detector(det) for det in detector_names]
+            
+            pipe = PipeStub(self.flags)
             ret = DictList()
-            for wav_params, proj_params in zip(wave_params, projection_params):
+            for i, (wav_params, proj_params) in enumerate(zip(wave_params,
+                                                              projection_params)):
                 sig = signal_worker(wav_params,
                                     proj_params,
                                     detectors,
                                     self.transform,
-                                    domain=self.domain)
+                                    domain=self.domain,
+                                    pipe=pipe,
+                                    pidx=0,
+                                    i=i)
                 for key, val in sig.items():
                     if key in ret:
                         ret.append(key, value=val)
@@ -353,35 +415,27 @@ class WaveformGetter(object):
             bar = None
             if verbose:
                 bar = mp_progress_tracker(len(indices),
-                                        name='Generating waveforms')
+                                          name='Generating waveforms')
+            
+            consumers, producers = [], []
             
             jobs = []
-            output = mp.Queue()
             for i in range(workers):
+                consumer, producer = mp.Pipe()
                 p = mp.Process(target=multi_wave_worker,
-                            args=(i,
-                                    wave_params[wb[i]],
-                                    projection_params[wb[i]],
-                                    detector_names,
-                                    self.transform,
-                                    self.domain,
-                                    bar,
-                                    output))
+                               args=(i,
+                                     wave_params[wb[i]],
+                                     projection_params[wb[i]],
+                                     detector_names,
+                                     self.transform,
+                                     self.domain,
+                                     bar,
+                                     producer))
                 jobs.append(p)
+                consumers.append(consumer)
+                producers.append(producer)
             
-            for p in jobs:
-                p.start()
-            
-            results = [output.get() for p in jobs]
-            
-            for p in jobs:
-                p.join()
-            
-            results.sort()
-            ret = DictList()
-            for pt in results:
-                ret.extend(pt[1])
-            ret = ret.as_dict()
+            ret = self.run_jobs(jobs, consumers, producers)
         
         if was_int:
             ret = {key: val[0] for (key, val) in ret.items()}
@@ -393,8 +447,46 @@ class WaveformGetter(object):
             return ret[self.detectors[0].name]
         return ret
     
-    #Legacy function
+    # * Legacy function
     generate_mp = generate
+    
+    def run_jobs(self, jobs, consumers, producers):
+        running = []
+        buffer = {}
+        for p in jobs:
+            p.start()
+            running.append(True)
+        
+        while any(running):
+            for i, cons in enumerate(consumers):
+                if not running[i]:
+                    continue
+                while cons.poll():
+                    flag, args, kwargs = cons.recv()
+                    stop = False
+                    if flag == 'output':
+                        pidx, val = args
+                        buffer[pidx] = val
+                    elif flag == 'stop':
+                        stop = True
+                    elif flag in self.flags:
+                        send, stop = self.flags[flag](*args, **kwargs)
+                        cons.send(send)
+                    if stop:
+                        running[i] = False
+        
+        for i, consumer in enumerate(consumers):
+            consumer.close()
+        for i, producer in enumerate(producers):
+            producer.close()
+        
+        ret = DictList()
+        for i in sorted(buffer.keys()):
+            ret.extend(buffer[i])
+        
+        for p in jobs:
+            p.join()
+        return ret.as_dict()
     
     def get_params(self, index=None):
         if index is None:
@@ -413,7 +505,8 @@ class WaveformGetter(object):
                 ret[key] = val[index]
         return ret
     
-    def transform(self, wav):
+    def transform(self, wav, pidx=None, i=None, wave_params=None,
+                  projection_params=None, pipe=None):
         return wav
     
     @property
@@ -467,7 +560,7 @@ class WaveformGetter(object):
         if domain.lower() in time_domains:
             self._domain = 'time'
         
-        if domain.lower()in freq_domains:
+        if domain.lower() in freq_domains:
             self._domain = 'frequency'
     
     @property
@@ -496,12 +589,7 @@ class WaveformGetter(object):
     def from_config(cls, config_file, number_samples):
         return
 
-from pycbc.workflow import WorkflowConfigParser
-from pycbc.distributions import read_params_from_config
-from pycbc.distributions import read_distributions_from_config
-from pycbc.distributions import read_constraints_from_config
-from pycbc.distributions import JointDistribution
-from pycbc.transforms import read_transforms_from_config, apply_transforms
+
 class WFParamGenerator(object):
     """A class that takes in a configuration file and creates parameters
     from the described distributions.
@@ -541,7 +629,7 @@ class WFParamGenerator(object):
 
         self.trans = read_transforms_from_config(config_file)
         self.pval = JointDistribution(self.var_args, *dist, 
-                                **{"constraints": constraints})   
+                                      **{"constraints": constraints})   
     
     def __contains__(self, name):
         """Returns true if the given name is a parameter name known to
@@ -559,7 +647,8 @@ class WFParamGenerator(object):
             variable arguments or any of the transform outputs.
         """
         in_params = (name in self.var_args) or (name in self.static)
-        in_trans = any([(name in trans.input) or (name in trans.output) for trans in self.trans])
+        in_trans = any([(name in trans.input) or (name in trans.output)
+                        for trans in self.trans])
         return in_params or in_trans
     
     def draw(self):
@@ -618,6 +707,7 @@ class WFParamGenerator(object):
         ret = ret.union(trans_output)
         return list(ret)
 
+
 class WaveformGenerator(WaveformGetter):
     def __init__(self, config_file, seed=0, domain='time',
                  detectors='H1'):
@@ -635,6 +725,7 @@ class WaveformGenerator(WaveformGetter):
             if key in params:
                 self.variable_params[key].append(params[key][0])
         return self[len(self)-1]
+
 
 class NoiseGenerator(object):
     """A class that efficiently generates time series noise samples of
@@ -660,6 +751,13 @@ class NoiseGenerator(object):
         self.delta_t = delta_t
         self.psd_name = psd_name
         self.flow = low_frequency_cutoff
+        self.flags = {'get_psd': self.get_psd}
+        self.cache = NamedPSDCache()
+    
+    def get_psd(self, flen, delta_f, low_freq_cutoff, psd_name=None):
+        psd = self.cache.get(flen, delta_f, low_freq_cutoff,
+                             psd_name=psd_name)
+        return psd, False
     
     def generate(self, number, workers=None, verbose=True, seed=None):
         """Generate a list of independently drawn noise samples.
@@ -693,24 +791,28 @@ class NoiseGenerator(object):
             workers = mp.cpu_count()
         
         if workers == 0:
-            class PutList(object):
-                def __init__(self):
-                    self.content = []
-                
-                def put(self, content):
-                    self.content.extend(content)
             
             bar = None
             if verbose:
                 bar = progress_tracker(number, name='Generating noise')
             
-            output = PutList()
+            pipe = PipeStub(self.flags)
             
-            multi_noise_worker(self.length, self.delta_t, self.psd_name,
+            multi_noise_worker(0, self.length, self.delta_t, self.psd_name,
                                self.flow, number, seed, self.transform,
-                               bar, output)
+                               bar, pipe)
             
-            return output.content
+            output = []
+            while pipe.poll():
+                msg = pipe.recv()
+                if len(msg) != 3:
+                    continue
+                flag, args, kwargs = msg
+                if flag == 'output':
+                    _, out = args
+                    output.extend(out)
+            
+            return output
         
         noise_per_worker = [number // workers] * workers
         if sum(noise_per_worker) < number:
@@ -725,9 +827,15 @@ class NoiseGenerator(object):
         output = mp.Queue()
         np.random.seed(seed)
         seeds = np.random.randint(0, 1e7, size=workers)
+        
+        consumers = []
+        producers = []
+        
         for i in range(workers):
+            consumer, producer = mp.Pipe()
             p = mp.Process(target=multi_noise_worker,
-                           args=(self.length,
+                           args=(i,
+                                 self.length,
                                  self.delta_t,
                                  self.psd_name,
                                  self.flow,
@@ -735,25 +843,56 @@ class NoiseGenerator(object):
                                  seeds[i],
                                  self.transform,
                                  bar,
-                                 output))
+                                 producer))
             jobs.append(p)
+            consumers.append(consumer)
+            producers.append(producer)
         
-        for p in jobs:
-            p.start()
-        
-        results = [output.get() for p in jobs]
-        
-        for p in jobs:
-            p.join()
-        
-        ret = []
-        for pt in results:
-            ret.extend(pt)
+        ret = self.run_jobs(jobs, consumers, producers)
         
         return ret
     
-    def transform(self, noise):
+    def run_jobs(self, jobs, consumers, producers):
+        running = []
+        buffer = {}
+        for p in jobs:
+            p.start()
+            running.append(True)
+        
+        while any(running):
+            for i, cons in enumerate(consumers):
+                if not running[i]:
+                    continue
+                while cons.poll():
+                    flag, args, kwargs = cons.recv()
+                    stop = False
+                    if flag == 'output':
+                        pidx, val = args
+                        buffer[pidx] = val
+                    elif flag == 'stop':
+                        stop = True
+                    elif flag in self.flags:
+                        send, stop = self.flags[flag](*args, **kwargs)
+                        cons.send(send)
+                    if stop:
+                        running[i] = False
+        
+        for consumer in consumers:
+            consumer.close()
+        for producer in producers:
+            producer.close()
+        
+        ret = []
+        for i in sorted(buffer.keys()):
+            ret.extend(buffer[i])
+        
+        for p in jobs:
+            p.join()
+        return ret
+    
+    def transform(self, noise, pidx=None, i=None, pipe=None):
         return noise
+
 
 class WhiteNoiseGenerator(NoiseGenerator):
     """A class that efficiently generates white time series noise. If a
@@ -780,8 +919,8 @@ class WhiteNoiseGenerator(NoiseGenerator):
      make sure to call the transform method of this class first:
      
      >>> class CustomWhiteNoise(WhiteNoiseGenerator):
-     >>>    def transform(self, noise):
-     >>>        noise = super().transform(noise)
+     >>>    def transform(self, noise, pidx=None, i=None, pipe=None):
+     >>>        noise = super().transform(noise, pidx=pidx, i=i, pipe=pipe)
      >>>        #Your custom operations
      >>>        return noise
     """
@@ -792,8 +931,14 @@ class WhiteNoiseGenerator(NoiseGenerator):
         super().__init__(length, delta_t, psd_name=psd_name,
                          low_frequency_cutoff=low_frequency_cutoff)
     
-    def transform(self, noise):
+    def transform(self, noise, pidx=None, i=None, pipe=None):
         if self.psd_name.lower() == 'simple':
             return noise
+        flen = len(noise) // 2 + 1
+        delta_f = noise.delta_f
+        pipe.send(['get_psd',
+                   [flen, delta_f, self.flow],
+                   {'psd_name': self.psd_name}])
+        psd = pipe.recv()
         return whiten(noise, low_freq_cutoff=self.flow,
-                      psd=self.psd_name)
+                      psd=psd)
