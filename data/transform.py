@@ -1,12 +1,14 @@
 import numpy as np
-from pycbc.types import TimeSeries
+from pycbc.types import TimeSeries, FrequencySeries
 from pycbc.psd import interpolate, inverse_spectrum_truncation, from_string
 from pycbc.psd import aLIGOZeroDetHighPower as aPSD
 from pycbc.filter import sigma
 from BnsLib.utils.formatting import input_to_list, list_length
+from BnsLib.utils import get_psd
+
 
 def whiten(strain_list, low_freq_cutoff=20., max_filter_duration=4.,
-           psd=None):
+            psd=None, is_asd=False):
     """Returns the data whitened by the PSD.
     
     Arguments
@@ -26,8 +28,13 @@ def whiten(strain_list, low_freq_cutoff=20., max_filter_duration=4.,
         The PSD that should be used to whiten the data. If set to None
         the pycbc.psd.aLIGOZeroDetHighPower PSD will be used. If a PSD
         is provided which does not fit the delta_f of the data, it will
-        be interpolated to fit. If a string is provided, it will be
-        assumed to be known to PyCBC.
+        be interpolated to fit. If a string is provided that is a path
+        to a file, the code will try to load that file. If loading is
+        not successfull or if no file is found the string will be
+        assumed to be a known PSD name which is passed to PyCBC.
+    is_asd : {bool, False}
+        This option is only used when the PSD is loaded from a file.
+        Set this option to True if the data in the file is a ASD.
     
     Returns
     -------
@@ -37,46 +44,37 @@ def whiten(strain_list, low_freq_cutoff=20., max_filter_duration=4.,
         is the whitened input data, where the inital and final seconds
         as specified by max_filter_duration are removed.
     """
-    org_type = type(strain_list)
-    if not org_type == list:
+    was_list = isinstance(strain_list, list)
+    
+    if not was_list:
         strain_list = [strain_list]
+    
+    if psd is None:
+        psd = 'aLIGOZeroDetHighPower'
     
     ret = []
     for strain in strain_list:
         df = strain.delta_f
         f_len = int(len(strain) / 2) + 1
-        if psd is None:
-            psd = aPSD(length=f_len,
-                       delta_f=df,
-                       low_freq_cutoff=low_freq_cutoff-2.)
-        elif isinstance(psd, str):
-            psd = from_string(psd,
-                              length=f_len,
-                              delta_f=df,
-                              low_freq_cutoff=low_freq_cutoff-2.)
-        else:
-            if not len(psd) == f_len:
-                msg = 'Length of PSD does not match data.'
-                raise ValueError(msg)
-            elif not psd.delta_f == df:
-                psd = interpolate(psd, df)
-        max_filter_len = int(max_filter_duration * strain.sample_rate) #Cut out the beginning and end
-        psd = inverse_spectrum_truncation(psd,
-                                          max_filter_len=max_filter_len,
-                                          low_frequency_cutoff=low_freq_cutoff,
-                                          trunc_method='hann')
+        wpsd = get_psd(psd, flen=f_len, delta_f=df,
+                       low_freq_cutoff=low_freq_cutoff, is_asd=is_asd)
+        max_filter_len = int(max_filter_duration * strain.sample_rate)
+        wpsd = inverse_spectrum_truncation(wpsd,
+                                           max_filter_len=max_filter_len,
+                                           low_frequency_cutoff=low_freq_cutoff,  # noqa: E501
+                                           trunc_method='hann')
         f_strain = strain.to_frequencyseries()
         kmin = int(low_freq_cutoff / df)
         f_strain.data[:kmin] = 0
         f_strain.data[-1] = 0
-        f_strain.data[kmin:] /= psd[kmin:] ** 0.5
+        f_strain.data[kmin:] /= wpsd[kmin:] ** 0.5
         strain = f_strain.to_timeseries()
         ret.append(strain[max_filter_len:len(strain)-max_filter_len])
     
-    if not org_type == list:
-        return(ret[0])
-    else:
+    if was_list:
         return(ret)
+    return(ret[0])
+
 
 def rescale_snr(signal, old_snr, new_snr):
     """Rescale a pycbc.TimeSeries or pycbc.FrequencySeries to a given
