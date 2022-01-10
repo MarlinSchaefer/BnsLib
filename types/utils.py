@@ -621,7 +621,6 @@ class MultiArrayIndexer(object):
             self.add_array_or_length(length)
     
     def add_length(self, length, name=None):
-        assert name is None or isinstance(name, str)
         assert isinstance(length, int) and length > 0
         self.lengths.append(length)
         self.cumlen.append(self.cumlen[-1] + length)
@@ -639,7 +638,7 @@ class MultiArrayIndexer(object):
             raise TypeError
     
     def remove_length(self, idx):
-        del self.cumlen[i]
+        del self.cumlen[idx]
         name = self._name_of_index(idx)
         del self.names[idx]
         length = self.lengths.pop(idx)
