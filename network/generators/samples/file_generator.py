@@ -318,6 +318,14 @@ class FileGenerator(keras.utils.Sequence):
         self.use_sample_weights = use_sample_weights
         self.on_epoch_end()
     
+    @property
+    def file_handler(self):
+        return self.file_handeler
+    
+    @file_handler.setter
+    def file_handler(self, fh):
+        self.file_handeler = fh
+    
     def on_epoch_end(self):
         if self.shuffle:
             np.random.shuffle(self.indices)
