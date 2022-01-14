@@ -1,4 +1,4 @@
-from .file_generator import BaseGenerator
+from .file_generator import FileGenerator
 from ....types import DictList
 import numpy as np
 import threading
@@ -6,7 +6,7 @@ import queue
 import time
 
 
-class GroupedIndexFileGenerator(BaseGenerator):
+class GroupedIndexFileGenerator(FileGenerator):
     """An extension of the FileGenerator that allows to group indices
     and shuffle them only within these groups.
     
