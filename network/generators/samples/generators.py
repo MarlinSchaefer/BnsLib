@@ -100,25 +100,19 @@ class PrefetchedFileGenerator(GroupedIndexFileGenerator):
             self.last_index_put = -1
     
     def __getitem__(self, index):
-        print(f"\nMain: __getitem__ called with index {index}")
         if index == 0:
             self.empty_queues()
         if self.workers is None or self.prefetch < 1:
-            print("Main: Sequential getitem")
             return super().__getitem__(index)
         else:
-            print("Main: Threaded getitem")
             upper = min(index + self.prefetch, len(self))
-            print(f"Main: (self.last_index_put, index + self.prefetch, len(self)) = {(self.last_index_put, index + self.prefetch, len(self))}")
             if upper > self.last_index_put:
                 for i in range(self.last_index_put+1, upper):
                     self.index_queue.put(i)
                     self.last_index_put = i
-                    print(f"Main: Put index {i}")
                 if len(self) <= upper:
                     self.last_index_put = len(self)
             data = self.fetched.get()
-            print(f"Main: Fetched data for index {index}")
             return data
     
     def empty_queues(self):
@@ -143,40 +137,26 @@ class PrefetchedFileGenerator(GroupedIndexFileGenerator):
         data = None
         index = None
         while not event.is_set():
-            # print(f"Thread {idx}: Start of event loop")
             if data is None:
-                # print(f"Thread {idx}: Data is None")
                 try:
-                    # print(f"Thread {idx}: Trying to grab index")
                     index = index_pipe.get(timeout=self.timeout)
                     print(f"Thread {idx}: Got index {index}")
                     data = super().__getitem__(index)
-                    # print(f"Thread {idx}: Obtained data for index {index}")
                 except queue.Empty:
-                    # print(f"Thread {idx}: Index queue timed out and seems to be empty")
                     continue
-            else:
-                # print(f"Thread {idx}: Data is NOT None")
-                pass
             try:
                 if self.last_fetched + 1 != index:
-                    # print(f"Thread {idx}: I have data but it's not my turn. (last_fetched + 1, index) = {(self.last_fetched + 1, index)}")
                     time.sleep(self.timeout)
                 else:
-                    # print(f"Thread {idx}: Trying to output for index {index}")
                     output_pipe.put(data, timeout=self.timeout)
-                    print(f"Thread {idx}: Successfully output index {index} now trying to set last_fetched with lock")
                     with self.lock:
                         self.last_fetched = index
-                    # print(f"Thread {idx}: Set last fetched to {index}")
                     data = None
             except queue.Full:
-                # print(f"Thread {idx}: Wanted to output my data but output queue seems to be full.")
                 continue
     
     def __enter__(self):
         if self.workers is not None and self.workers > 0 and self.prefetch > 0:
-            print("Main: Starting threads")
             self.event = threading.Event()
             self.lock = threading.Lock()
             self.threads = []
@@ -192,7 +172,6 @@ class PrefetchedFileGenerator(GroupedIndexFileGenerator):
     
     def __exit__(self, exc_type, exc_value, exc_traceback):
         if hasattr(self, 'event'):
-            print("Main: Stopping threads")
             self.event.set()
             if hasattr(self, 'threads'):
                 while len(self.threads) > 0:
