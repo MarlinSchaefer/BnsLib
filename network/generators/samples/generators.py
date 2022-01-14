@@ -107,11 +107,13 @@ class PrefetchedFileGenerator(GroupedIndexFileGenerator):
             upper = min(index + self.prefetch, len(self))
             print(f"Main: (self.last_index_put, index + self.prefetch, len(self)) = {(self.last_index_put, index + self.prefetch, len(self))}")
             if upper > self.last_index_put:
-                i = len(self)
                 for i in range(self.last_index_put+1, upper):
                     self.index_queue.put(i)
                     print(f"Main: Put index {i}")
-                self.last_index_put = i
+                if upper < len(self):
+                    self.last_index_put = i
+                else:
+                    self.last_index_put = len(self)
             data = self.fetched.get()
             print(f"Main: Fetched data for index {index}")
             return data
