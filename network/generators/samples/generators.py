@@ -122,9 +122,7 @@ class PrefetchedFileGenerator(GroupedIndexFileGenerator):
             return data
     
     def empty_queues(self):
-        print("Main: Empty-queues called")
         if hasattr(self, 'fetched'):
-            print("Main: Emptying queues called")
             while True:
                 try:
                     self.fetched.get(timeout=0.01)
@@ -145,35 +143,35 @@ class PrefetchedFileGenerator(GroupedIndexFileGenerator):
         data = None
         index = None
         while not event.is_set():
-            print(f"Thread {idx}: Start of event loop")
+            # print(f"Thread {idx}: Start of event loop")
             if data is None:
-                print(f"Thread {idx}: Data is None")
+                # print(f"Thread {idx}: Data is None")
                 try:
-                    print(f"Thread {idx}: Trying to grab index")
+                    # print(f"Thread {idx}: Trying to grab index")
                     index = index_pipe.get(timeout=self.timeout)
                     print(f"Thread {idx}: Got index {index}")
                     data = super().__getitem__(index)
-                    print(f"Thread {idx}: Obtained data for index {index}")
+                    # print(f"Thread {idx}: Obtained data for index {index}")
                 except queue.Empty:
-                    print(f"Thread {idx}: Index queue timed out and seems to be empty")
+                    # print(f"Thread {idx}: Index queue timed out and seems to be empty")
                     continue
             else:
-                print(f"Thread {idx}: Data is NOT None")
+                # print(f"Thread {idx}: Data is NOT None")
                 pass
             try:
                 if self.last_fetched + 1 != index:
-                    print(f"Thread {idx}: I have data but it's not my turn. (last_fetched + 1, index) = {(self.last_fetched + 1, index)}")
+                    # print(f"Thread {idx}: I have data but it's not my turn. (last_fetched + 1, index) = {(self.last_fetched + 1, index)}")
                     time.sleep(self.timeout)
                 else:
-                    print(f"Thread {idx}: Trying to output for index {index}")
+                    # print(f"Thread {idx}: Trying to output for index {index}")
                     output_pipe.put(data, timeout=self.timeout)
                     print(f"Thread {idx}: Successfully output index {index} now trying to set last_fetched with lock")
                     with self.lock:
                         self.last_fetched = index
-                    print(f"Thread {idx}: Set last fetched to {index}")
+                    # print(f"Thread {idx}: Set last fetched to {index}")
                     data = None
             except queue.Full:
-                print(f"Thread {idx}: Wanted to output my data but output queue seems to be full.")
+                # print(f"Thread {idx}: Wanted to output my data but output queue seems to be full.")
                 continue
     
     def __enter__(self):
