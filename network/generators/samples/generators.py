@@ -59,8 +59,7 @@ class GroupedIndexFileGenerator(BaseGenerator):
                 self.index_groups.append(np.arange(sidx, eidx, dtype=int))
                 sidx = eidx
         self.shuffle_groups = bool(shuffle_groups)
-        self.apply_shuffle()
-        self.set_indices()
+        self.on_epoch_end()
     
     def on_epoch_end(self):
         # The __init__ method of the FileGenerator calls this method
