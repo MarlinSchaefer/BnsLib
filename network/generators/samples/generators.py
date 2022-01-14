@@ -146,6 +146,7 @@ class PrefetchedFileGenerator(GroupedIndexFileGenerator):
                     continue
             else:
                 # print(f"Thread {idx}: Data is NOT None")
+                pass
             try:
                 if self.last_fetched + 1 != index:
                     # print(f"Thread {idx}: I have data but it's not my turn. (last_fetched + 1, index) = {(self.last_fetched + 1, index)}")
