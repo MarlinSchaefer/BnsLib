@@ -100,9 +100,12 @@ class PrefetchedFileGenerator(GroupedIndexFileGenerator):
     def __getitem__(self, index):
         print(f"Main: __getitem__ called with index {index}")
         if self.workers is None or self.prefetch < 1:
+            print("Main: Sequential getitem")
             return super().__getitem__(index)
         else:
+            print("Main: Threaded getitem")
             upper = min(index + self.prefetch, len(self))
+            print(f"Main: (self.last_index_put, index + self.prefetch, len(self)) = {(self.last_index_put, index + self.prefetch, len(self))}")
             if upper > self.last_index_put:
                 i = len(self)
                 for i in range(self.last_index_put+1, upper):
