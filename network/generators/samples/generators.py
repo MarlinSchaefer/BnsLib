@@ -1,6 +1,9 @@
 from .file_generator import FileGenerator
 from ....types import DictList
 import numpy as np
+import threading
+import queue
+import time
 
 
 class GroupedIndexFileGenerator(FileGenerator):
@@ -76,3 +79,93 @@ class GroupedIndexFileGenerator(FileGenerator):
     
     def set_indices(self):
         self.indices = np.concatenate(self.index_groups)
+
+
+class PrefetchedFileGenerator(GroupedIndexFileGenerator):
+    def __init__(self, *args, prefetch=None, workers=None, timeout=0.01,
+                 **kwargs):
+        super().__init__(*args, **kwargs)
+        self.prefetch = prefetch if prefetch is not None else 0
+        self.workers = workers
+        self.timeout = timeout
+        self._init_queues()
+    
+    def _init_queues(self):
+        if self.prefetch > 0 and self.workers is not None:
+            self.fetched = queue.Queue(maxsize=2*self.prefetch)
+            self.index_queue = queue.Queue(maxsize=2*self.prefetch)
+            self.last_fetched = -1
+            self.last_index_put = -1
+    
+    def __getitem__(self, index):
+        if self.workers is None or self.prefetch < 1:
+            return super().__getitem__(index)
+        else:
+            upper = min(index + self.prefetch, len(self))
+            if upper > self.last_index_put:
+                i = len(self)
+                for i in range(self.last_index_put+1, upper):
+                    self.index_queue.put(i)
+                self.last_index_put = i
+            data = self.fetched.get()
+            return data
+    
+    def on_epoch_end(self):
+        super().on_epoch_end()
+        if hasattr(self, 'fetched'):
+            while True:
+                try:
+                    self.fetched.get(timeout=0.01)
+                except queue.Empty:
+                    break
+            while True:
+                try:
+                    self.index_queue.get(timeout=0.01)
+                except queue.Empty:
+                    break
+            self._init_queues()
+    
+    def fetch_func(self, idx, index_pipe, output_pipe, event):
+        data = None
+        index = None
+        while not event.is_set():
+            if data is None:
+                try:
+                    index = index_pipe.get(timeout=self.timeout)
+                    data = super().__getitem__(index)
+                except queue.Empty:
+                    continue
+            try:
+                if self.last_fetched + 1 != index:
+                    time.sleep(self.timeout)
+                else:
+                    output_pipe.put(data, timeout=self.timeout)
+                    with self.lock:
+                        self.last_fetched = index
+                    data = None
+            except queue.Full:
+                continue
+    
+    def __enter__(self):
+        if self.workers is not None and self.workers > 0 and self.prefetch > 0:
+            self.event = threading.Event()
+            self.lock = threading.Lock()
+            self.threads = []
+            for i in range(self.workers):
+                thread = threading.Thread(target=self.fetch_func,
+                                          args=(i,
+                                                self.index_queue,
+                                                self.fetched,
+                                                self.event))
+                self.threads.append(thread)
+                thread.start()
+        return
+    
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        if hasattr(self, 'event'):
+            self.event.set()
+            if hasattr(self, 'threads'):
+                while len(self.threads) > 0:
+                    thread = self.threads.pop(0)
+                    thread.join()
+            self.event = None
