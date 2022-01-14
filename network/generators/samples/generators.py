@@ -94,7 +94,7 @@ class PrefetchedFileGenerator(GroupedIndexFileGenerator):
         if self.prefetch > 0 and self.workers is not None:
             if not hasattr(self, 'fetched'):
                 self.fetched = queue.Queue(maxsize=2*self.prefetch)
-            if not hasattr(self, index_queue):
+            if not hasattr(self, 'index_queue'):
                 self.index_queue = queue.Queue(maxsize=2*self.prefetch)
             self.last_fetched = -1
             self.last_index_put = -1
