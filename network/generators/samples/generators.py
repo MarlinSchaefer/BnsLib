@@ -98,6 +98,7 @@ class PrefetchedFileGenerator(GroupedIndexFileGenerator):
             self.last_index_put = -1
     
     def __getitem__(self, index):
+        print(f"Main: __getitem__ called with index {index}")
         if self.workers is None or self.prefetch < 1:
             return super().__getitem__(index)
         else:
