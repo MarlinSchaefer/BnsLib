@@ -286,7 +286,8 @@ class MultiFileHandler(object):
 
 MultiFileHandeler = MultiFileHandler
 
-class FileGenerator(keras.utils.Sequence):
+# class FileGenerator(keras.utils.Sequence):
+class FileGenerator(object):
     """A Generator as required by Keras. It generates the samples from
     a FileHandeler or MultiFileHandeler.
     
