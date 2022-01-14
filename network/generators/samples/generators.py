@@ -69,6 +69,7 @@ class GroupedIndexFileGenerator(BaseGenerator):
         if hasattr(self, 'index_groups'):
             self.apply_shuffle()
             self.set_indices()
+            self.cbatch = 0
     
     def apply_shuffle(self):
         if self.shuffle:
