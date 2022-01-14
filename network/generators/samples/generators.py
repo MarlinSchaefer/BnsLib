@@ -98,7 +98,9 @@ class PrefetchedFileGenerator(GroupedIndexFileGenerator):
             self.last_index_put = -1
     
     def __getitem__(self, index):
-        print(f"Main: __getitem__ called with index {index}")
+        print(f"\nMain: __getitem__ called with index {index}")
+        if index == 0:
+            self.empty_queues()
         if self.workers is None or self.prefetch < 1:
             print("Main: Sequential getitem")
             return super().__getitem__(index)
@@ -117,8 +119,7 @@ class PrefetchedFileGenerator(GroupedIndexFileGenerator):
             print(f"Main: Fetched data for index {index}")
             return data
     
-    def on_epoch_end(self):
-        super().on_epoch_end()
+    def empty_queues(self):
         if hasattr(self, 'fetched'):
             while True:
                 try:
@@ -131,6 +132,10 @@ class PrefetchedFileGenerator(GroupedIndexFileGenerator):
                 except queue.Empty:
                     break
             self._init_queues()
+    
+    def on_epoch_end(self):
+        super().on_epoch_end()
+        self.empty_queues()
     
     def fetch_func(self, idx, index_pipe, output_pipe, event):
         data = None
