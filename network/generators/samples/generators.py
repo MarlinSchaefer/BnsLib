@@ -140,7 +140,6 @@ class PrefetchedFileGenerator(GroupedIndexFileGenerator):
             if data is None:
                 try:
                     index = index_pipe.get(timeout=self.timeout)
-                    print(f"Thread {idx}: Got index {index}")
                     data = super().__getitem__(index)
                 except queue.Empty:
                     continue
