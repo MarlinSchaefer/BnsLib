@@ -4,6 +4,7 @@ import numpy as np
 import threading
 import queue
 import time
+import multiprocessing as mp
 
 
 class GroupedIndexFileGenerator(FileGenerator):
@@ -176,4 +177,68 @@ class PrefetchedFileGenerator(GroupedIndexFileGenerator):
                 while len(self.threads) > 0:
                     thread = self.threads.pop(0)
                     thread.join()
+            self.event = None
+
+
+class PrefetchedFileGeneratorMP(PrefetchedFileGenerator):
+    def __init__(self, *args, **kwargs):
+        workers = kwargs.get('workers', None)
+        if workers is not None and workers < 0:
+            workers = mp.cpu_count()
+        kwargs['workers'] = workers
+        super().__init__(*args, **kwargs)
+    
+    def _init_queues(self):
+        if self.prefetch > 0 and self.workers is not None:
+            if not hasattr(self, 'fetched'):
+                self.fetched = mp.Queue(maxsize=2*self.prefetch)
+            if not hasattr(self, 'index_queue'):
+                self.index_queue = mp.Queue(maxsize=2*self.prefetch)
+            if hasattr(self, 'last_fetched'):
+                self.last_fetched.value = -1
+            else:
+                self.last_fetched = mp.Value('i', -1)
+            self.last_index_put = -1
+    
+    def fetch_func(self, idx, index_pipe, output_pipe, event):
+        data = None
+        index = None
+        while not event.is_set():
+            if data is None:
+                try:
+                    index = index_pipe.get(timeout=self.timeout)
+                    data = super(PrefetchedFileGenerator, self).__getitem__(index)
+                except queue.Empty:
+                    continue
+            try:
+                if self.last_fetched.value + 1 != index:
+                    time.sleep(self.timeout)
+                else:
+                    output_pipe.put(data, timeout=self.timeout)
+                    self.last_fetched.value = index
+                    data = None
+            except queue.Full:
+                continue
+    
+    def __enter__(self):
+        if self.workers is not None and self.workers > 0 and self.prefetch > 0:
+            self.event = mp.Event()
+            self.processes = []
+            for i in range(self.workers):
+                process = mp.Process(target=self.fetch_func,
+                                     args=(i,
+                                           self.index_queue,
+                                           self.fetched,
+                                           self.event))
+                self.processes.append(process)
+                process.start()
+        return
+    
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        if hasattr(self, 'event'):
+            self.event.set()
+            if hasattr(self, 'processes'):
+                while len(self.processes) > 0:
+                    process = self.processes.pop(0)
+                    process.join()
             self.event = None
