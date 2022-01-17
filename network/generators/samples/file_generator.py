@@ -383,3 +383,54 @@ class FileGenerator(keras.utils.Sequence):
             return X, Y, W
         else:
             return X, Y
+
+
+def format_batch(data, input_shape, output_shape):
+    # data = [(input, output, sample_weights), (input, output, sample_weights), ...]
+    # (sample_weights may be omitted)
+    batch_size = len(data)
+    use_sample_weights = len(data[0]) == 3
+    if isinstance(input_shape, list):
+        X = [np.zeros([batch_size] + list(shape)) for shape in input_shape]
+    else:
+        X = np.zeros([batch_size] + list(input_shape))
+    
+    if isinstance(output_shape, list):
+        Y = [np.zeros([batch_size] + list(shape)) for shape in output_shape]
+    else:
+        Y = np.zeros([batch_size] + list(output_shape))
+    
+    if use_sample_weights:
+        if isinstance(output_shape, list):
+            W = [np.zeros(batch_size) for _ in len(output_shape)]
+        else:
+            W = np.zeros(batch_size)
+    
+    for num, dat in enumerate(data):
+        if use_sample_weights:
+            inp, out, wei = dat
+            if isinstance(wei, list):
+                for part, w in zip(wei, W):
+                    w[num] = part
+            else:
+                for w in W:
+                    w[num] = wei
+        else:
+            inp, out = dat
+        
+        if isinstance(inp, list):
+            for part, x in zip(inp, X):
+                x[num] = part
+        else:
+            X[num] = inp
+    
+        if isinstance(out, list):
+            for part, y in zip(out, Y):
+                y[num] = part
+        else:
+            Y[num] = out
+    
+    if use_sample_weights:
+        return X, Y, W
+    else:
+        return X, Y

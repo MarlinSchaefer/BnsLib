@@ -1,4 +1,4 @@
-from .file_generator import FileGenerator
+from .file_generator import FileGenerator, format_batch
 from ....types import DictList
 import numpy as np
 import threading
@@ -181,6 +181,21 @@ class PrefetchedFileGenerator(GroupedIndexFileGenerator):
 
 
 class PrefetchedFileGeneratorMP(PrefetchedFileGenerator):
+    """Multiprocessing version of the PrefetchedFileGenerator. It is a
+    drop-in replacement, where multiple processes rather than multiple
+    threads are required.
+    
+    The file-handler used to generate the data must implement the two
+    methods
+        -serialize
+        -from_serialized
+    The serialize method should convert the object into a serialized
+    object, i.e. a construct that can be stored by the json module. The
+    from_serialized method has to be a class-method that returns a copy
+    of the serialized object.
+    This is used to ensure that each process can have its own local copy
+    of the handler to guard against problems when accessing files.
+    """
     def __init__(self, *args, **kwargs):
         workers = kwargs.get('workers', None)
         if workers is not None and workers < 0:
@@ -203,22 +218,31 @@ class PrefetchedFileGeneratorMP(PrefetchedFileGenerator):
     def fetch_func(self, idx, index_pipe, output_pipe, event):
         data = None
         index = None
-        while not event.is_set():
-            if data is None:
+        fh = self.file_handler.from_serialized(self.file_handler.serialize())
+        with fh:
+            while not event.is_set():
+                if data is None:
+                    try:
+                        index = index_pipe.get(timeout=self.timeout)
+                        if (idx + 1) * self.batch_size > len(self.indices):
+                            batch = self.indices[idx*self.batch_size:]
+                        else:
+                            batch = self.indices[idx*self.batch_size:(idx+1)*self.batch_size]
+                        data = [fh[self.index_list[i]] for i in batch]
+                        data = format_batch(data,
+                                            input_shape=fh.input_shape,
+                                            output_shape=fh.output_shape)
+                    except queue.Empty:
+                        continue
                 try:
-                    index = index_pipe.get(timeout=self.timeout)
-                    data = super(PrefetchedFileGenerator, self).__getitem__(index)
-                except queue.Empty:
+                    if self.last_fetched.value + 1 != index:
+                        time.sleep(self.timeout)
+                    else:
+                        output_pipe.put(data, timeout=self.timeout)
+                        self.last_fetched.value = index
+                        data = None
+                except queue.Full:
                     continue
-            try:
-                if self.last_fetched.value + 1 != index:
-                    time.sleep(self.timeout)
-                else:
-                    output_pipe.put(data, timeout=self.timeout)
-                    self.last_fetched.value = index
-                    data = None
-            except queue.Full:
-                continue
     
     def __enter__(self):
         if self.workers is not None and self.workers > 0 and self.prefetch > 0:
