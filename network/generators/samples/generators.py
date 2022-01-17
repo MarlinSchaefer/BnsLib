@@ -221,27 +221,41 @@ class PrefetchedFileGeneratorMP(PrefetchedFileGenerator):
         fh = self.file_handler.from_serialized(self.file_handler.serialize())
         with fh:
             while not event.is_set():
+                print(f"Process {idx}: Start of event loop")
                 if data is None:
+                    print(f"Process {idx}: Data is None, trying to get index")
                     try:
                         index = index_pipe.get(timeout=self.timeout)
-                        if (idx + 1) * self.batch_size > len(self.indices):
-                            batch = self.indices[idx*self.batch_size:]
+                        print(f"Process {idx}: Got index {index}, trying to get batch")
+                        if (index + 1) * self.batch_size > len(self.indices):
+                            batch = self.indices[index*self.batch_size:]
                         else:
-                            batch = self.indices[idx*self.batch_size:(idx+1)*self.batch_size]
+                            batch = self.indices[index*self.batch_size:(index+1)*self.batch_size]
+                        print(f"Process {idx}: Successfully obtained batch with {len(batch)} samples, trying to get data")
                         data = [fh[self.index_list[i]] for i in batch]
+                        print(f"Process {idx}: Successfully got data, trying to format data")
                         data = format_batch(data,
                                             input_shape=fh.input_shape,
                                             output_shape=fh.output_shape)
+                        print(f"Process {idx}: Successfully formatted data")
                     except queue.Empty:
+                        print(f"Process {idx}: Index queue seems empty, trying again")
                         continue
                 try:
+                    print(f"Process {idx}: Checking if I can output data (self.last_fetched, index)={(self.last_fetched.value, index)}")
                     if self.last_fetched.value + 1 != index:
+                        print(f"Process {idx}: Not my turn just yet, sleeping")
                         time.sleep(self.timeout)
+                        print(f"Process {idx}: After sleep")
                     else:
+                        print(f"Process {idx}: Trying to output data for index {index}")
                         output_pipe.put(data, timeout=self.timeout)
+                        print(f"Process {idx}: Successfully output data to pipe for index {index}, trying to det last_fetched")
                         self.last_fetched.value = index
+                        print(f"Process {idx}: Successfully set last_fetched to {index}")
                         data = None
                 except queue.Full:
+                    print(f"Process {idx}: Output queue seems to be full, trying again (data is None: {data is None}")
                     continue
     
     def __enter__(self):
