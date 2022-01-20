@@ -296,6 +296,7 @@ class PrefetchedFileGeneratorMP(PrefetchedFileGenerator):
                             break
                     spipe.close()
                     rpipe.close()
+                self.empty_queues()
                 while len(self.processes) > 0:
                     process = self.processes.pop(0)
                     process.join()
