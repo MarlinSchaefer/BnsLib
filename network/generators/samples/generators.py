@@ -276,19 +276,30 @@ class PrefetchedFileGeneratorMP(PrefetchedFileGenerator):
                                            recv_pipe))
                 self.processes.append(process)
                 process.start()
-                self.pipes.append(send_pipe)
+                self.pipes.append((send_pipe, recv_pipe))
             self.subprocess = False
     
     def __exit__(self, exc_type, exc_value, exc_traceback):
         if hasattr(self, 'event'):
             self.event.set()
             if hasattr(self, 'processes'):
+                for spipe, rpipe in self.pipes:
+                    while rpipe.poll():
+                        try:
+                            rpipe.recv(timeout=0.01)
+                        except queue.Empty:
+                            break
+                    while spipe.poll():
+                        try:
+                            spipe.recv(timeout=0.01)
+                        except queue.Empty:
+                            break
+                    spipe.close()
+                    rpipe.close()
                 while len(self.processes) > 0:
                     process = self.processes.pop(0)
                     process.join()
             self.event = None
-            for pipe in self.pipes:
-                pipe.close()
     
     def __setattr__(self, name, value):
         if hasattr(self, 'synced'):
@@ -300,8 +311,8 @@ class PrefetchedFileGeneratorMP(PrefetchedFileGenerator):
         super().__setattr__(name, value)
     
     def _send(self, item):
-        for pipe in self.pipes:
-            pipe.send(item)
+        for spipe, rpipe in self.pipes:
+            spipe.send(item)
 
 
 class ScaledPrefetchedGeneratorMP(PrefetchedFileGeneratorMP):
