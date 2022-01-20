@@ -1,5 +1,6 @@
 from .file_generator import FileGenerator, format_batch
 from ....types import DictList
+from ....utils import input_to_list
 import numpy as np
 import threading
 import queue
@@ -113,7 +114,12 @@ class PrefetchedFileGenerator(GroupedIndexFileGenerator):
                     self.last_index_put = i
                 if len(self) <= upper:
                     self.last_index_put = len(self)
-            data = self.fetched.get()
+            while True:
+                try:
+                    data = self.fetched.get(timeout=self.timeout)
+                    break
+                except queue.Empty:
+                    continue
             return data
     
     def empty_queues(self):
@@ -196,12 +202,20 @@ class PrefetchedFileGeneratorMP(PrefetchedFileGenerator):
     This is used to ensure that each process can have its own local copy
     of the handler to guard against problems when accessing files.
     """
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, synced=None, **kwargs):
         workers = kwargs.get('workers', None)
         if workers is not None and workers < 0:
             workers = mp.cpu_count()
         kwargs['workers'] = workers
         super().__init__(*args, **kwargs)
+        if synced is None:
+            synced = []
+        synced = input_to_list(synced)
+        self.synced = ['timeout',
+                       'batch_size',
+                       'indices',
+                       'index_list']
+        self.synced.extend(synced)
     
     def _init_queues(self):
         if self.prefetch > 0 and self.workers is not None:
@@ -215,12 +229,15 @@ class PrefetchedFileGeneratorMP(PrefetchedFileGenerator):
                 self.last_fetched = mp.Value('i', -1)
             self.last_index_put = -1
     
-    def fetch_func(self, idx, index_pipe, output_pipe, event):
+    def fetch_func(self, idx, index_pipe, output_pipe, event, msg_pipe):
         data = None
         index = None
         fh = self.file_handler.from_serialized(self.file_handler.serialize())
         with fh:
             while not event.is_set():
+                while msg_pipe.poll():
+                    name, value = msg_pipe.recv()
+                    setattr(self, name, value)
                 if data is None:
                     try:
                         index = index_pipe.get(timeout=self.timeout)
@@ -248,15 +265,19 @@ class PrefetchedFileGeneratorMP(PrefetchedFileGenerator):
         if self.workers is not None and self.workers > 0 and self.prefetch > 0:
             self.event = mp.Event()
             self.processes = []
+            self.pipes = []
             for i in range(self.workers):
+                send_pipe, recv_pipe = mp.Pipe()
                 process = mp.Process(target=self.fetch_func,
                                      args=(i,
                                            self.index_queue,
                                            self.fetched,
-                                           self.event))
+                                           self.event,
+                                           recv_pipe))
                 self.processes.append(process)
                 process.start()
-        return
+                self.pipes.append(send_pipe)
+            self.subprocess = False
     
     def __exit__(self, exc_type, exc_value, exc_traceback):
         if hasattr(self, 'event'):
@@ -266,3 +287,85 @@ class PrefetchedFileGeneratorMP(PrefetchedFileGenerator):
                     process = self.processes.pop(0)
                     process.join()
             self.event = None
+            for pipe in self.pipes:
+                pipe.close()
+    
+    def __setattr__(self, name, value):
+        if hasattr(self, 'synced'):
+            conditions = [name in self.synced,
+                          hasattr(self, 'pipes'),
+                          hasattr(self, 'subprocess')]
+            if all(conditions) and not self.subprocess:
+                self._send((name, value))
+        super().__setattr__(name, value)
+    
+    def _send(self, item):
+        for pipe in self.pipes:
+            pipe.send(item)
+
+
+class ScaledPrefetchedGeneratorMP(PrefetchedFileGeneratorMP):
+    """Multiprocessing version of the PrefetchedFileGenerator. It is a
+    drop-in replacement, where multiple processes rather than multiple
+    threads are required.
+    
+    The file-handler used to generate the data must implement the two
+    methods
+        -serialize
+        -from_serialized
+    The serialize method should convert the object into a serialized
+    object, i.e. a construct that can be stored by the json module. The
+    from_serialized method has to be a class-method that returns a copy
+    of the serialized object.
+    This is used to ensure that each process can have its own local copy
+    of the handler to guard against problems when accessing files.
+    """
+    def __init__(self, *args, target=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if 'target' not in self.synced:
+            self.synced.append('target')
+        if 'rescaled' not in self.synced:
+            self.synced.append('rescaled')
+        self.rescaled = None
+        self.rescale(target)
+    
+    def fetch_func(self, idx, index_pipe, output_pipe, event, msg_pipe):
+        data = None
+        index = None
+        rescaled = self.rescaled
+        fh = self.file_handler.from_serialized(self.file_handler.serialize())
+        fh.rescale(self.target)
+        with fh:
+            while not event.is_set():
+                while msg_pipe.poll():
+                    name, value = msg_pipe.recv()
+                    setattr(self, name, value)
+                if rescaled != self.rescaled:
+                    rescaled = self.rescaled
+                    fh.rescale(self.target)
+                if data is None:
+                    try:
+                        index = index_pipe.get(timeout=self.timeout)
+                        if (index + 1) * self.batch_size > len(self.indices):
+                            batch = self.indices[index*self.batch_size:]
+                        else:
+                            batch = self.indices[index*self.batch_size:(index+1)*self.batch_size]
+                        data = [fh[self.index_list[i]] for i in batch]
+                        data = format_batch(data,
+                                            input_shape=fh.input_shape,
+                                            output_shape=fh.output_shape)
+                    except queue.Empty:
+                        continue
+                try:
+                    if self.last_fetched.value + 1 != index:
+                        time.sleep(self.timeout)
+                    else:
+                        output_pipe.put(data, timeout=self.timeout)
+                        self.last_fetched.value = index
+                        data = None
+                except queue.Full:
+                    continue
+    
+    def rescale(self, target):
+        self.rescaled = time.perf_counter()
+        self.target = target

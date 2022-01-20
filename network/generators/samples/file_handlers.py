@@ -17,6 +17,9 @@ class H5pyHandler(FileHandler):
     help(H5pyHandler._getitem_open) for information on how to implement
     them.
     
+    In case you want to also use some form of re-scaling that can be
+    accessed during iteration, also implement the rescale method.
+    
     Arguments
     ---------
     file_path : str
@@ -111,6 +114,20 @@ class H5pyHandler(FileHandler):
             A single sample that can be processed downstream.
         """
         raise NotImplementedError
+    
+    def serialize(self):
+        dic = {}
+        dic['file_path'] = self.file_path
+        dic['base_index'] = self.base_index
+        return dic
+    
+    @classmethod
+    def from_serialized(cls, dic):
+        return cls(dic['file_path'],
+                   base_index=dic['base_index'])
+    
+    def rescale(self, target):
+        raise NotImplementedError
 
 
 class CachedH5pyHandler(H5pyHandler):
@@ -160,6 +177,9 @@ class CachedH5pyHandler(H5pyHandler):
             self.cache[index] = ret
         
         return ret
+    
+    def rescale(self, target):
+        raise NotImplementedError
 
 
 class LoadDataHandler(FileHandler):
@@ -241,3 +261,13 @@ class LoadDataHandler(FileHandler):
     
     def __exit__(self, exc_type, exc_value, exc_traceback):
         return NotImplemented
+    
+    def serialize(self):
+        raise TypeError("This class is not intended for use in multiprocessing.")
+    
+    @classmethod
+    def from_serialized(self, dic):
+        raise TypeError("This class is not intended for use in multiprocessing.")
+    
+    def rescale(self, target):
+        raise NotImplementedError
