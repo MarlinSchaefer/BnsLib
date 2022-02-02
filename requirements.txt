@@ -1,0 +1,4 @@
+pycbc>=1.18.1
+tensorflow>=2.3.0
+tensorflow_probability>=0.11.1
+pandas>=1.1.3

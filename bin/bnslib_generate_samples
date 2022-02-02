@@ -1,0 +1,393 @@
+#!/usr/bin/env python
+from BnsLib.data import WaveformGetter, WhiteNoiseGenerator, whiten
+from BnsLib.types import NamedPSDCache
+
+from pycbc.filter import sigma
+from pycbc.conversions import tau0_from_mass1_mass2
+
+import numpy as np
+import h5py
+import os
+import sys
+import time
+from argparse import ArgumentParser
+import logging
+import subprocess
+
+
+class SignalGetter(WaveformGetter):
+    def __init__(self, *args, psd=None, low_freq_cutoff=20,
+                 dyn_range_fac=None, signal_duration=None,
+                 tc_mean_position=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.cache = NamedPSDCache(psd_names=psd)
+        self.psd = psd
+        self.flags.update({'psd': self.access_cached_psds})
+        self.low_freq_cutoff = low_freq_cutoff
+        if tc_mean_position is None:
+            self.tc_mean_position = 63
+        else:
+            self.tc_mean_position = tc_mean_position
+        if dyn_range_fac is None:
+            # self.dyn_range_fac = DYN_RANGE_FAC
+            self.dyn_range_fac = 1
+        else:
+            self.dyn_range_fac = dyn_range_fac
+        if signal_duration is None:
+            self.signal_duration = 64
+        else:
+            self.signal_duration = signal_duration
+        assert self.tc_mean_position > 0
+        assert self.tc_mean_position < self.signal_duration
+        self.prev_wav = {}
+    
+    def access_cached_psds(self, ts, **kwargs):
+        psd = self.cache.get_from_timeseries(ts,
+                                             low_freq_cutoff=self.low_freq_cutoff,  # noqa: E501
+                                             psd_name=self.psd)
+        return psd, False
+
+    def transform(self, wav, pidx=None, i=None, wave_params=None,
+                  projection_params=None, pipe=None):
+        # Calculate approximate SNR
+        sample_rate = wav.sample_rate
+        wwav = wav.copy()
+        wwav.prepend_zeros(5 * int(sample_rate))
+        wwav.append_zeros(4 * int(sample_rate))
+        msg = ['psd', [wwav], {}]
+        pipe.send(msg)
+        psd = pipe.recv()
+        wav = whiten(wwav, psd=psd)
+        snr = sigma(wav, low_frequency_cutoff=self.low_freq_cutoff)
+
+        # Crop signal and convert to single precision
+        wav.prepend_zeros(int(self.signal_duration * sample_rate))
+        wav.append_zeros(int(self.signal_duration * sample_rate))
+        # wav.start_time assumed negative
+        s0 = int(-float(wav.start_time) * sample_rate)
+        sidx = s0 - int(self.tc_mean_position * sample_rate)
+        eidx = sidx + int(self.signal_duration * sample_rate)
+        wav = wav[sidx:eidx]
+        
+        wav = wav * self.dyn_range_fac
+        wav = wav.astype(np.float32)
+        wav = wav.numpy()
+        return wav, snr
+
+
+def generate_signals(file_path, variable_params, static_params, psd,
+                     detectors, tc_mean_position=63, verbose=True,
+                     signal_duration=64):
+    sample_rate = int(1. / static_params['delta_t'])
+    flower = static_params['f_lower']
+    logging.info("Generating whitened signals")
+    wav_getter = SignalGetter(variable_params=variable_params,
+                              static_params=static_params,
+                              detectors=detectors,
+                              signal_duration=signal_duration,
+                              tc_mean_position=tc_mean_position,
+                              psd=psd)
+    
+    out = wav_getter.generate(single_detector_as_list=False,
+                              workers=None,
+                              verbose=verbose)
+    
+    # Format SignalGetter.generate output
+    to_store = np.zeros((len(wav_getter),
+                         len(detectors),
+                         int(signal_duration * sample_rate)))
+    partial_array = np.zeros((len(detectors),
+                              int(signal_duration * sample_rate)))
+    for i in range(len(wav_getter)):
+        snrs = []
+        for j, det in enumerate(detectors):
+            wav, snr = out[det][i]
+            partial_array[j, :] = wav[:]
+            snrs.append(snr)
+        netsnr = np.sqrt(np.sum(np.square(np.array(snrs))))
+        to_store[i, :, :] = partial_array[:, :] / netsnr
+    to_store = to_store.transpose(1, 0, 2)
+    
+    # Calculate tau0
+    m1 = variable_params['mass1']
+    m2 = variable_params['mass2']
+    tau0s = tau0_from_mass1_mass2(m1, m2, flower)
+    
+    # Store signals
+    with h5py.File(file_path, 'w') as fp:
+        data_gr = fp.create_group('data')
+        label_gr = fp.create_group('labels')
+        params_gr = fp.create_group('params')
+        for i, det in enumerate(detectors):
+            dataset = data_gr.create_dataset(str(i), data=to_store[i])
+            dataset.attrs['detector'] = det
+        
+        labels = tau0s
+        labels = labels + 1
+        label_gr.create_dataset('0', data=labels)
+        
+        for key, val in wav_getter.get_params().items():
+            if key == 'approximant':
+                params_gr.create_dataset(key, data=np.array(val, dtype='S'))
+            else:
+                params_gr.create_dataset(key, data=np.array(val))
+        params_gr.create_dataset('tau0', data=tau0s)
+    logging.info(f'Saved signals at {file_path}')
+    
+    return len(wav_getter)
+
+
+def generate_noise(file_path, psd, static_params, detectors,
+                   signal_duration=64, verbose=True, number_samples=1,
+                   chunk_size=None, seed=None):
+    sample_rate = int(1. / static_params['delta_t'])
+    
+    if seed is None:
+        seed = int(time.time())
+    
+    if chunk_size is None:
+        flower = max(static_params['f_lower']-2, 0.)
+        logging.debug('Called noise generation without a chunk-size')
+        logging.info("Generating white noise")
+        ngen = WhiteNoiseGenerator(int(sample_rate * signal_duration),
+                                   1. / sample_rate,
+                                   psd_name=psd,
+                                   low_frequency_cutoff=flower)
+        
+        noise = {}
+        for i, det in enumerate(detectors):
+            tmp = ngen.generate(number_samples, seed=seed+i,
+                                verbose=verbose)
+            noise[det] = np.vstack([np.expand_dims(np.array(pt), axis=0)
+                                    for pt in tmp])
+        
+        # Store noise
+        file_path = file_path.format(file_number=0,
+                                     number_samples=number_samples,
+                                     chunk_size=number_samples)
+        with h5py.File(file_path, 'w') as fp:
+            data_gr = fp.create_group('data')
+            for i, (key, val) in enumerate(noise.items()):
+                dataset = data_gr.create_dataset(str(i), data=val)
+                dataset.attrs['detector'] = key
+        logging.info(f'Saved noise to {file_path}')
+    else:
+        logging.debug(('Called noise generation with a chunk-size of '
+                       f'{chunk_size}'))
+        base_name, extension = os.path.splitext(file_path)
+        num_chunks = int(np.ceil(number_samples / float(chunk_size)))
+        file_paths = [base_name + '_' + str(i) + extension
+                      for i in range(num_chunks)]
+        tmp = [0]
+        for i in range(num_chunks):
+            tmp.append(min(tmp[-1] + chunk_size, number_samples))
+        num_samps_list = [tmp[i+1]-tmp[i] for i in range(num_chunks)]
+        seeds = [seed + i * len(detectors) for i in range(len(file_paths))]
+        
+        for i, (file_path, num_samps, cseed) in enumerate(zip(file_paths,
+                                                              num_samps_list,
+                                                              seeds)):
+            logging.info("In chunk {}/{}".format(i+1, num_chunks))
+            file_path = file_path.format(file_number=i,
+                                         number_samples=number_samples,
+                                         chunk_size=num_chunks)
+            generate_noise(file_path, static_params, detectors,
+                           signal_duration, number_samples=num_samps,
+                           seed=cseed)
+
+
+def check_existence(args, name, variable_params, static_params):
+    argval = getattr(args, name)
+    if argval is None:
+        if name not in static_params \
+           and name not in variable_params:
+            raise ValueError(f'`{name}` unspecified')
+    else:
+        if name in variable_params:
+            raise ValueError((f"Can't overwrite `{name}` in variable "
+                              "parameters"))
+        else:
+            static_params[name] = argval
+    return
+
+
+def main():
+    parser = ArgumentParser()
+    
+    parser.add_argument('--parameters', type=str, required=True,
+                        help=("Path to the file containing the parameters to "
+                              "use for signal generation. If the file does not"
+                              " exist, it will be generated. (the options "
+                              "`--injection-file` and `--ninj` must be "
+                              "provided)"))
+    parser.add_argument('--injection-file', type=str,
+                        help=("Path to the injection file from which "
+                              "parameters are generated. Only required if no "
+                              "file is found at the path specified in "
+                              "`--parameters`."))
+    parser.add_argument('--ninj', type=int,
+                        help=("The number of injections to "))
+    parser.add_argument('--approximant', type=str, default='TaylorF2',
+                        help=("The waveform approximant to use. "
+                              "Default: `TaylorF2`"))
+    parser.add_argument('--sample-rate', type=int, default=2048,
+                        help=("The sample rate at which data is generated. "
+                              "Default: 2048"))
+    parser.add_argument('--f-lower', type=float, default=15.,
+                        help=("The lower frequency cutoff for waveform and "
+                              "noise generation. Default: 15"))
+    parser.add_argument('--detectors', type=str, nargs='+',
+                        default=['H1', 'L1'],
+                        help=("The detectors for which to generate the data. "
+                              "Default: [`H1`, `L1`]"))
+    parser.add_argument('--tc-mean-position', type=float, default=63,
+                        help=("The time in the window at which the merger is "
+                              "located for tc=0. Default: 63"))
+    parser.add_argument('--signal-duration', type=float, default=64,
+                        help=("The duration of the full signal in seconds."))
+    parser.add_argument('--not-generate-signals', action='store_true',
+                        help="Skip generating signals.")
+    parser.add_argument('--seed', type=int,
+                        help=("The seed to use for generating signals and "
+                              "noise. Default: None"))
+    
+    parser.add_argument('--not-generate-noise', action='store_true',
+                        help="Skip generating the noise.")
+    parser.add_argument('--number-noise-samples', type=int, default=400_000,
+                        help=("The number of noise samples to generate. "
+                              "Ignored if --generate-noise is not set. "
+                              "Default: 400,000"))
+    parser.add_argument('--chunk-size', type=int,
+                        help=("Store up to this number of noise samples in a "
+                              "single file. This option is ignored if "
+                              "--generate-noise is not set. Default: None"))
+    parser.add_argument('--psd', type=str, default='Voyager.txt',
+                        help=("Path to a file containing the PSD data or name "
+                              "of a PSD known to PyCBC. "
+                              "Default: `Voyager.dat`"))
+    
+    parser.add_argument('--signal-output', type=str, default='signals.hdf',
+                        help=("The path under which the signals should be "
+                              "stored. Default: signals.hdf"))
+    parser.add_argument('--noise-output', type=str,
+                        default='{file_number}-noise-{chunk_size}-{number_samples}.hdf',  # noqa: E501
+                        help=("The path under which the noise files should be "
+                              "stored. May be a format-string, where the "
+                              "filled in variables are `file_number` "
+                              "(the current iteration number), `chunk_size` "
+                              "(the number of samples contained in this file) "
+                              "or `number_samples` (the total number of "
+                              "samples generated in this run). Default: "
+                              "{file_number}-noise-{chunk_size}-{number_samples}.hdf"))  # noqa: E501
+    
+    parser.add_argument('--store-command', type=str,
+                        help=("Path under which the command that generated "
+                              "the data will be stored. Do not set this option"
+                              " if you do not want to store the command."))
+    parser.add_argument('--verbose', action='store_true',
+                        help="Print progress updates.")
+    parser.add_argument('--debug', action='store_true',
+                        help="Print debugging information.")
+    parser.add_argument('--force', action='store_true',
+                        help="Overwrite existing files.")
+    
+    args = parser.parse_args()
+    
+    log_level = logging.INFO if args.verbose else logging.WARN
+    if args.debug:
+        log_level = logging.DEBUG
+    
+    logging.basicConfig(format='%(levelname)s | %(asctime)s: %(message)s',
+                        level=log_level, datefmt='%d-%m-%Y %H:%M:%S')
+    
+    logging.info('Program starting')
+    
+    # Test if files exist
+    if os.path.isfile(args.signal_output) \
+       and not args.not_generate_signals \
+       and not args.force:
+        msg = f'File {args.signal_output} already exists. '
+        msg += 'Set the flag --force to overwrite it.'
+        raise IOError(msg)
+    if not args.not_generate_noise \
+       and os.path.isfile(args.noise_output) \
+       and not args.force:
+        msg = f'File {args.noise_output} already exists. '
+        msg += 'Set the flag --force to overwrite it.'
+        raise IOError(msg)
+    
+    # Store the command that is being executed
+    if args.store_command is not None:
+        if os.path.isfile(args.store_command) and not args.force:
+            msg = f'File {args.store_command} already exists. '
+            msg += 'Set the flag --force to overwrite it.'
+            raise IOError(msg)
+        with open(args.store_command, 'w') as fp:
+            fp.write(' '.join(sys.argv))
+        logging.debug(f'Stored the command at {args.store_command}')
+    
+    if args.seed is None:
+        logging.debug('No seed found. Generating new one.')
+        args.seed = int(time.time() % 1e6)
+    logging.info(f'Using seed {args.seed}')
+    
+    # Generate parameters if they do not exist
+    if not os.path.isfile(args.parameters) or \
+       (args.force and args.injection_file is not None and
+       args.ninj is not None):
+        if args.injection_file is None or args.ninj is None:
+            msg = 'Must specify injection file and ninj if no parameters'
+            msg += 'are provided.'
+            raise ValueError(msg)
+        cmd = ['pycbc_create_injections']
+        cmd.extend(['--config-files', args.injection_file])
+        cmd.extend(['--ninjections', str(args.ninj)])
+        cmd.extend(['--seed', str(args.seed)])
+        cmd.extend(['--output-file', args.parameters])
+        if args.verbose:
+            cmd.append('--verbose')
+        if args.force:
+            cmd.append('--force')
+        subprocess.run(cmd)
+    
+    params = {}
+    static_params = {}
+    with h5py.File(args.parameters, 'r') as fp:
+        for key in fp.keys():
+            params[key] = fp[key][()]
+        if 'static_args' in fp.attrs:
+            for key in fp.attrs['static_args']:
+                static_params[key] = fp.attrs[key]
+    
+    check_existence(args, 'approximant', params, static_params)
+    check_existence(args, 'f_lower', params, static_params)
+    if args.sample_rate is None:
+        args.delta_t = None
+    else:
+        args.delta_t = 1. / args.sample_rate
+    check_existence(args, 'delta_t', params, static_params)
+        
+    sample_rate = args.sample_rate
+    
+    logging.debug((f'Set static parameters {static_params} and sample rate '
+                   f'{sample_rate}'))
+    
+    if not args.not_generate_signals:
+        generate_signals(args.signal_output, params, static_params,
+                         args.psd, args.detectors,
+                         tc_mean_position=args.tc_mean_position,
+                         signal_duration=args.signal_duration,
+                         verbose=args.verbose)
+    
+    if not args.not_generate_noise:
+        generate_noise(args.noise_output, args.psd, static_params,
+                       args.detectors,
+                       signal_duration=args.signal_duration,
+                       number_samples=args.number_noise_samples,
+                       chunk_size=args.chunk_size, seed=args.seed,
+                       verbose=args.verbose)
+    logging.info('Finished')
+
+
+if __name__ == "__main__":
+    main()
