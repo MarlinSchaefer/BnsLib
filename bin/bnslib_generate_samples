@@ -127,7 +127,7 @@ def generate_signals(file_path, variable_params, static_params, psd,
         label_gr.create_dataset('0', data=labels)
         
         for key, val in wav_getter.get_params().items():
-            if np.array(val).char == 'U':
+            if np.array(val).dtype.char == 'U':
                 params_gr.create_dataset(key, data=np.array(val, dtype='S'))
             else:
                 params_gr.create_dataset(key, data=np.array(val))
