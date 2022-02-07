@@ -67,12 +67,17 @@ class MultiFileHandler(object):
     mode : {str, 'r'}
         The mode in which files will be opened. (leave this as default
         if unsure of the consequences)
+    input_shape : {tuple of int or None, None}
+        The shape the network expects as input.
+    output_shape : {tuple of int or None, None}
+        The shape the network expects as labels.
     """
-    def __init__(self, file_handlers=None, mode='r'):
+    def __init__(self, file_handlers=None, mode='r', input_shape=None,
+                 output_shape=None):
         self._init_file_handlers(file_handlers)
         self.mode = mode
-        self.input_shape = None  # Shape the network expects as input
-        self.output_shape = None  # Shape the network expects as labels
+        self.input_shape = input_shape
+        self.output_shape = output_shape
     
     def __contains__(self, idx):
         """Check if a return value can be constructed from the index
@@ -100,15 +105,13 @@ class MultiFileHandler(object):
     def __enter__(self):
         """Initialization code at the beginning of a `with` statement.
         """
-        for file_handler in self.file_handlers:
-            file_handler.open(mode=self.mode)
+        self.open(mode=self.mode)
         return self
     
     def __exit__(self, exc_type, exc_value, exc_traceback):
         """Cleanup-code when exiting a `with` statement.
         """
-        for file_handler in self.file_handlers:
-            file_handler.close()
+        self.close()
     
     def __getitem__(self, idx):
         """Return the formatted item corresponding to the index.
@@ -286,6 +289,59 @@ class MultiFileHandler(object):
             if the FileGenerator sets use_sample_weights to True.
         """
         return inp['all']
+    
+    def serialize(self):
+        dic = {}
+        dic['input_shape'] = self.input_shape
+        dic['output_shape'] = self.output_shape
+        dic['mode'] = self.mode
+        fh_ser = []
+        for fh in self.file_handlers:
+            classname = fh.__class__.__name__
+            try:
+                serial = fh.serialize()
+            except AttributeError:
+                raise TypeError((f"The file-handler {classname} cannot be "
+                                 "serialized as the method `.serialize` is "
+                                 "not implemented."))
+            for key, l in self.file_handler_groups.items():
+                if key == 'all':
+                    continue
+                if fh in l:
+                    fh_ser.append((key, classname, serial))
+                    break
+            else:
+                fh_ser.append(('all', classname, serial))
+        dic['file_handlers'] = fh_ser
+        return dic
+    
+    @classmethod
+    def from_serialized(cls, dic, handlers):
+        ret = cls(mode=dic['mode'],
+                  input_shape=dic['input_shape'],
+                  output_shape=dic['output_shape'])
+        if not isinstance(handlers, dict):
+            try:
+                handlers = {handler.__name__: handler for handler in handlers}
+            except TypeError:
+                raise TypeError(("Handlers must be either passed as a "
+                                 "dictionary or iterable. Got "
+                                 f"{type(handlers)} instead."))
+        for (group, classname, serial) in dic['file_handlers']:
+            if classname not in handlers:
+                raise ValueError(f"The file handler {classname} is not found "
+                                 "in the given handlers.")
+            fh = handlers[classname].from_serialized(serial)
+            ret.add_file_handler(fh, group=group)
+        return ret
+    
+    def open(self, mode='r'):
+        for fh in self.file_handlers:
+            fh.open(mode=mode)
+    
+    def close(self):
+        for fh in self.file_handlers:
+            fh.close()
 
 
 MultiFileHandeler = MultiFileHandler

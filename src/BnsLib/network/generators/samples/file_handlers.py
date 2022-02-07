@@ -124,8 +124,8 @@ class H5pyHandler(FileHandler):
     
     @classmethod
     def from_serialized(cls, dic):
-        return cls(dic['file_path'],
-                   base_index=dic['base_index'])
+        fpath = dic.pop('file_path', None)
+        return cls(fpath, **dic)
     
     def rescale(self, target):
         raise NotImplementedError
