@@ -688,6 +688,10 @@ class MultiArrayIndexer(object):
     def __getitem__(self, idx):
         return self.get(idx)
     
+    def __contains__(self, index):
+        index = self._sanitize_int(index)
+        return index < len(self)
+    
     def get(self, start, stop=None, replace_names=True):
         if isinstance(start, slice):
             assert stop is None
