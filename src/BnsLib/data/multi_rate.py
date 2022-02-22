@@ -122,6 +122,118 @@ def multi_rate_sample(ts, samples_per_part, sample_rates, reverse=False,
     return parts
 
 
+def multi_rate_sample_fast(ts, samples_per_part, sample_rates, reverse=False,
+                           keep_end=True):
+    """Function to re-sample a given time series at multiple rates.
+    
+    Arguments
+    ---------
+    ts : pycbc.TimeSeries
+        The time series to be re-sampled.
+    samples_per_part : int
+        How many samples each part should contain.
+    sample_rates : list of int
+        A list of the sample rates that should be used.
+        If reverse is False the first entry corresponds
+        to the sample rate that should be used for the
+        final part of the time series. The second entry
+        corresponds to the part prior to the final part
+        and does not overlap.
+    reverse : {bool, False}
+        Set this to True, if the first sample rate in
+        sample_rates should re-sample the inital part of
+        the time series. (i.e. re-sampling happens in
+        a time-ordered manner)
+    keep_end : {bool, True}
+        If the re-sampled time series is shorter than the
+        original time series, this option specifies if
+        the original time-series is cropped in the beginning
+        or end. (Default: cropped in the beginning)
+    
+    Returns
+    -------
+    re-sampled : list of pycbc.TimeSeries
+        A list of pycbc.TimeSeries containing the re-sampled
+        data. The time series are ordered, such that the
+        first list entry corresponds to the initial part
+        of the time series and the final entry corresponds
+        to the final part of the waveform.
+    
+    Examples
+    --------
+    -We want to re-sample a time series of duration 10s.
+     Each part should 400 samples. We want to sample
+     the initial part of the time series with a sample
+     rate of 50 and the part after that using a sample
+     rate of 200. Therefore second 0 to 8 would be sampled
+     at a rate of 50 and second 8 to 10 using a rate of 200.
+     We could use the call:
+     multi_rate_sample(ts, 400, [200, 50])
+     or
+     multi_rate_sample(ts, 400, [50, 200], reverse=True)
+     
+     We would receive the return
+     [TimeSeries(start_time=0, end_time=8, sample_rate=50),
+      TimeSeries(start_time=8, end_time=10, sample_rate=200)]
+     in both cases.
+    
+    -We want to re-sample a time series of duration 10s. We want
+     each part to contain 400 samples and want to use the sample
+     rates [400, 50]. The re-sampled time series would be of
+     total duration 9s, as sampling 400 samples with a rate of
+     400 yields 1s and sampling 400 samples with a rate of 50 would
+     yield 8s. The function call would be either
+     multi_rate_sample(ts, 400, [400, 50])
+     or
+     multi_rate_sample(ts, 400, [50, 400], reverse=True)
+     
+     with the output
+     [TimeSeries(start_time=1, end_time=9, sample_rate=50),
+      TimeSeries(start_time=9, end_time=10, sample_rate=400)]
+    """
+    if reverse:
+        sample_rates = sample_rates.copy()
+        sample_rates.reverse()
+    sample_rates = np.array(sample_rates, dtype=int)
+    samples_per_part = int(samples_per_part)
+    durations = float(samples_per_part) / sample_rates
+    total_duration = sum(durations)
+    if total_duration > ts.duration:
+        msg = 'Cannot re-sample a time series of duration '
+        msg += f'{ts.duration} with sample-rates {sample_rates} and '
+        msg += f'samples per part {samples_per_part}.'
+        ValueError(msg)
+    parts = []
+    last_idx = len(ts)
+    if not keep_end:
+        sample_rates = list(sample_rates)
+        sample_rates.reverse()
+        sample_rates = np.array(sample_rates, dtype=int)
+        last_idx = 0
+    for i, sr in enumerate(sample_rates):
+        nsamps = int(samples_per_part * ts.sample_rate / sr)
+        if keep_end:
+            cdata = ts[last_idx-nsamps:last_idx]
+        else:
+            cdata = ts[last_idx:last_idx+nsamps]
+        print(len(cdata))
+        resampled_data, resampled_t = resample(cdata.numpy(),
+                                               samples_per_part,
+                                               t=np.array(cdata.sample_times))
+        delta_t = resampled_t[1] - resampled_t[0]
+        epoch = resampled_t[0]
+        resampled = TimeSeries(resampled_data, delta_t=delta_t,
+                               epoch=epoch)
+        parts.append(resampled)
+        if keep_end:
+            last_idx -= nsamps
+        else:
+            last_idx += nsamps
+    if keep_end:
+        parts.reverse()
+    return parts
+
+
 def get_ideal_sample_rates(flow, fhigh, samples_per_part, mass1_min,
                            mass2_min, min_time=32., time_variance=0.25):
     """Generate the optimal sample-rates to use to resolve a signal
