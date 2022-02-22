@@ -216,7 +216,6 @@ def multi_rate_sample_fast(ts, samples_per_part, sample_rates, reverse=False,
             cdata = ts[last_idx-nsamps:last_idx]
         else:
             cdata = ts[last_idx:last_idx+nsamps]
-        print(len(cdata))
         resampled_data, resampled_t = resample(cdata.numpy(),
                                                samples_per_part,
                                                t=np.array(cdata.sample_times))
