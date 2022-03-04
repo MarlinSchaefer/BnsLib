@@ -8,6 +8,7 @@ from .math import safe_min, safe_max
 from .progress_bar import progress_tracker, mp_progress_tracker
 from .psd import apply_low_freq_cutoff, apply_delta_f, load_psd_file, get_psd
 from .profile import Profiler
+from .files import TempFile
 
 
 __all__ = ['uniform_from_bounds', 'estimate_transformed_bounds', 'BinaryTree',
@@ -16,4 +17,4 @@ __all__ = ['uniform_from_bounds', 'estimate_transformed_bounds', 'BinaryTree',
            'field_array_to_dict', 'dict_to_field_array', 'split_str_by_vars',
            'inverse_string_format', 'safe_min', 'safe_max', 'progress_tracker',
            'mp_progress_tracker', 'apply_low_freq_cutoff', 'apply_delta_f',
-           'load_psd_file', 'get_psd', 'Profiler']
+           'load_psd_file', 'get_psd', 'Profiler', 'TempFile']

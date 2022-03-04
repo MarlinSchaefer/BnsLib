@@ -77,8 +77,9 @@ class H5pyHandler(FileHandler):
         return self.file
     
     def close(self):
-        self.file.close()
-        self.file = None
+        if self.file is not None:
+            self.file.close()
+            self.file = None
     
     def __enter__(self, mode='r'):
         return self.open(mode=mode)
