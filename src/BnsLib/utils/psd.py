@@ -24,12 +24,12 @@ def load_psd_file(path, flen=None, delta_f=None, low_freq_cutoff=None,
     try:
         with h5py.File(path, 'r') as f:
             data = f['data'][:]
-            delta_f = f['data'].attrs['delta_f']
+            hdf_delta_f = f['data'].attrs['delta_f']
             if 'epoch' in f['data'].attrs:    
                 epoch = f['data'].attrs['epoch']
             else:
                 epoch = None
-            psd = FrequencySeries(data, delta_f=delta_f, epoch=epoch)
+            psd = FrequencySeries(data, delta_f=hdf_delta_f, epoch=epoch)
         if is_asd_file:
             psd = psd ** 2
         if flen is None:
@@ -37,9 +37,10 @@ def load_psd_file(path, flen=None, delta_f=None, low_freq_cutoff=None,
             psd = apply_low_freq_cutoff(psd, low_freq_cutoff)
         else:
             if delta_f is None:
+                print(f"Setting df to {psd.delta_f}")
                 delta_f = psd.delta_f
             if low_freq_cutoff is None:
-                low_freq_cutoff = 0.       
+                low_freq_cutoff = 0.
             psd = from_numpy_arrays(psd.sample_frequencies,
                                     psd.numpy(),
                                     flen,
@@ -57,7 +58,6 @@ def load_psd_file(path, flen=None, delta_f=None, low_freq_cutoff=None,
         if is_asd_file:
             noise_data = noise_data ** 2
         if delta_f is None:
-            # delta_f = (freq_data.max() - freq_data.min()) / len(freq_data)
             delta_f = (freq_data[1:] - freq_data[:-1]).min()
         if flen is None:
             flen = int(freq_data.max() // delta_f)
