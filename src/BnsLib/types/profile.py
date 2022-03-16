@@ -2,7 +2,7 @@ import time
 import numpy as np
 import pandas as pd
 
-from ..types import DictList
+from .utils import DictList
 
 
 class Profiler(object):

@@ -1,7 +1,8 @@
 import os
 import numpy as np
-from pycbc.types import load_frequencyseries, FrequencySeries
+from pycbc.types import FrequencySeries
 from pycbc.psd import from_string, from_numpy_arrays, interpolate
+import h5py
 
 
 def apply_low_freq_cutoff(freqseries, low_freq_cutoff):
@@ -21,7 +22,14 @@ def apply_delta_f(freqseries, delta_f):
 def load_psd_file(path, flen=None, delta_f=None, low_freq_cutoff=None,
                   is_asd_file=False):
     try:
-        psd = load_frequencyseries(path)
+        with h5py.File(path, 'r') as f:
+            data = f['data'][:]
+            delta_f = f['data'].attrs['delta_f']
+            if 'epoch' in f['data'].attrs:    
+                epoch = f['data'].attrs['epoch']
+            else:
+                epoch = None
+            psd = FrequencySeries(data, delta_f=delta_f, epoch=epoch)
         if is_asd_file:
             psd = psd ** 2
         if flen is None:
@@ -37,7 +45,7 @@ def load_psd_file(path, flen=None, delta_f=None, low_freq_cutoff=None,
                                     flen,
                                     delta_f,
                                     low_freq_cutoff)
-    except ValueError:
+    except (OSError, ValueError):
         file_data = np.loadtxt(path)
         if (file_data < 0).any() or \
            np.logical_not(np.isfinite(file_data)).any():
@@ -48,12 +56,13 @@ def load_psd_file(path, flen=None, delta_f=None, low_freq_cutoff=None,
         
         if is_asd_file:
             noise_data = noise_data ** 2
-        if flen is None:
-            flen = len(noise_data)
         if delta_f is None:
-            delta_f = freq_data[1] - freq_data[0]
+            # delta_f = (freq_data.max() - freq_data.min()) / len(freq_data)
+            delta_f = (freq_data[1:] - freq_data[:-1]).min()
+        if flen is None:
+            flen = int(freq_data.max() // delta_f)
         if low_freq_cutoff is None:
-            low_freq_cutoff = 0.
+            low_freq_cutoff = max(0., freq_data.min()+10*delta_f)
         psd = from_numpy_arrays(freq_data, noise_data, flen, delta_f,
                                 low_freq_cutoff)
     return psd
