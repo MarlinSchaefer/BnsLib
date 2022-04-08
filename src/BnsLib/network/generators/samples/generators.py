@@ -155,10 +155,11 @@ class PrefetchedFileGenerator(GroupedIndexFileGenerator):
                 if self.last_fetched + 1 != index:
                     time.sleep(self.timeout)
                 else:
-                    output_pipe.put(data, timeout=self.timeout)
-                    with self.lock:
-                        self.last_fetched = index
-                    data = None
+                    if not event.is_set():
+                        output_pipe.put(data, timeout=self.timeout)
+                        with self.lock:
+                            self.last_fetched = index
+                        data = None
             except queue.Full:
                 continue
     
@@ -256,9 +257,10 @@ class PrefetchedFileGeneratorMP(PrefetchedFileGenerator):
                     if self.last_fetched.value + 1 != index:
                         time.sleep(self.timeout)
                     else:
-                        output_pipe.put(data, timeout=self.timeout)
-                        self.last_fetched.value = index
-                        data = None
+                        if not event.is_set():
+                            output_pipe.put(data, timeout=self.timeout)
+                            self.last_fetched.value = index
+                            data = None
                 except queue.Full:
                     continue
     
