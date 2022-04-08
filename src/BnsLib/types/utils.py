@@ -469,25 +469,25 @@ class DataSize(object):
     
     def __truediv__(self, other):
         if isinstance(other, type(self)):
-            raise TypeError('Cannot divide datasize by datasize.')
+            return self.as_bytes() / other.as_bytes()
         else:
             return DataSize(self.as_bytes() / other, unit='B')
     
     def __rtruediv__(self, other):
         if isinstance(other, type(self)):
-            raise TypeError('Cannot divide datasize by datasize.')
+            return other.as_bytes() / self.as_bytes()
         else:
             return DataSize(other / self.as_bytes(), unit='B')
     
     def __floordiv__(self, other):
         if isinstance(other, type(self)):
-            raise TypeError('Cannot divide datasize by datasize.')
+            return self.as_bytes() // other.as_bytes()
         else:
             return DataSize(self.as_bytes() // other, unit='B')
     
     def __rfloordiv__(self, other):
         if isinstance(other, type(self)):
-            raise TypeError('Cannot divide datasize by datasize.')
+            return other.as_bytes() // self.as_bytes()
         else:
             return DataSize(other // self.as_bytes(), unit='B')
 
@@ -627,9 +627,9 @@ class MultiArrayIndexer(object):
             self.add_array_or_length(length)
     
     def add_length(self, length, name=None):
-        assert isinstance(length, int) and length > 0
-        self.lengths.append(length)
-        self.cumlen.append(self.cumlen[-1] + length)
+        assert isinstance(length, (int, np.integer)) and length > 0
+        self.lengths.append(int(length))
+        self.cumlen.append(self.cumlen[-1] + int(length))
         self.names.append(name)
     
     def add_array(self, array, name=None):
@@ -638,8 +638,8 @@ class MultiArrayIndexer(object):
     def add_array_or_length(self, item, name=None):
         if hasattr(item, '__len__'):
             self.add_array(item, name=name)
-        elif isinstance(item, int):
-            self.add_length(item, name=name)
+        elif isinstance(item, (int, np.integer)):
+            self.add_length(int(item), name=name)
         else:
             raise TypeError
     
@@ -661,7 +661,7 @@ class MultiArrayIndexer(object):
         return self.cumlen[-1]
     
     def _get_index_value_pair(self, idx):
-        assert isinstance(idx, int)
+        assert isinstance(idx, (int, np.integer))
         index = np.searchsorted(self.cumlen, idx, side='right')
         assert index > 0, f"Got index {index} for idx {idx}"
         if index >= len(self.lengths):
@@ -678,12 +678,12 @@ class MultiArrayIndexer(object):
         return name
     
     def _sanitize_int(self, idx):
-        assert isinstance(idx, int)
+        assert isinstance(idx, (int, np.integer))
         if idx < 0:
             idx = len(self) + idx
         if idx < 0:
             raise IndexError('Index out of range [too small]')
-        return idx
+        return int(idx)
     
     def __getitem__(self, idx):
         return self.get(idx)
@@ -697,13 +697,13 @@ class MultiArrayIndexer(object):
             assert stop is None
             idx = start
         elif stop is not None:
-            assert isinstance(start, int)
+            assert isinstance(start, (int, np.integer))
             assert start < stop
             assert start >= 0
             idx = slice(start, stop)
         else:
             idx = start
-        if isinstance(idx, int):
+        if isinstance(idx, (int, np.integer)):
             idx = self._sanitize_int(idx)
             index, val = self._get_index_value_pair(idx)
             name = self._name_of_index(index,
