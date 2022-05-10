@@ -5,6 +5,8 @@ from tensorflow.keras import backend as K
 from tensorflow.python.ops import nn
 from tensorflow.python.keras.engine.base_layer import input_spec
 import numpy as np
+import copy
+from functools import partial
 
 InputSpec = input_spec.InputSpec
 
@@ -531,3 +533,164 @@ class WConv1D(keras.layers.Layer):
         }
         base_config = super(WConv1D, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+
+class NetConvolve(keras.layers.Layer):
+    """A layer that allows to apply networks that require a fixed
+    input-size to an arbitrary input.
+    
+    This layer expects the input to be of shape
+    (batch_size, samples, channels)
+    
+    For usage, a single layer has to be passed in. To apply a stack of
+    layers define a new layer class:
+    
+    >>> class MyLayer(keras.layers.Layer):
+    >>>     def __init__(self, *args, **kwargs):
+    >>>         self.layer1 = keras.layers.Conv1D(filters=1, kernel_size=1)
+    >>>         self.layer2 = keras.layers.Conv1D(filters=1, kernel_size=1)
+    >>>     
+    >>>     def call(self, x):
+    >>>         x = self.layer1(x)
+    >>>         x = self.layer2(x)
+    >>>         return x
+    
+    Afterwards the convolved layer can be integrated into the network simply
+    by
+    
+    >>> x = NetConvolve(MyLayer(), stride=2, padding=`zeros`)(x)
+    
+    `MyLayer` in the example above may be replaced by any singular layer or
+    Model.
+    
+    Arguments
+    ---------
+    model : keras.layers.Layer or keras.models.Model
+        The layer/model that should be convolved over the data.
+    stride : {int or None, None}
+        The stride to use for shifting the window. If set to None, it
+        is assumed to be 1.
+    padding : {`zeros` or `reflect` or `symmetric` or None, None}
+        The kind of padding that should be applied. If set to None, no
+        padding will be applied and it is not guaranteed that the entire
+        input will be processed.
+    squeeze : {bool, True}
+        Whether the output shape is (False)
+          (batch_size, nsteps, model.output_shape[1:])
+        or (True)
+          (batch_size, nsteps * model.output_shape[1], model.output_shape[2:])
+        
+    
+    Notes
+    -----
+        -The convolved sub-network will not appear in the model summary.
+         Instead only a single line for the NetConvolve layer will be
+         shown. The number of trainable and non-trainable parameters
+         will be preserved.
+    """
+    def __init__(self, model, *args, stride=None, padding=None,
+                 squeeze=True, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.payload = model
+        window_size = model.input_shape[1]
+        self.window_size = window_size
+        self.stride = 1 if stride is None else stride
+        self.padding = padding
+        self.squeeze = squeeze
+        self.nslices = None
+        self.cslice = 0
+    
+    def apply_padding(self, x):
+        if self.padding is None or self.window_size is None:
+            return x
+        
+        batch_size, nsamps, nchannels = x.shape
+        if nsamps is None:
+            return x
+        
+        optimal_nslices = int(np.ceil((int(nsamps) - self.window_size)
+                                      / self.stride + 1))
+        optimal_length = (optimal_nslices - 1) * self.stride + self.window_size
+        padding = np.zeros((3, 2))
+        padding[1, 1] = optimal_length - nsamps
+        padding = tf.constant(padding, dtype=tf.int32)
+        if self.padding.lower() == 'zeros':
+            return tf.pad(x, padding, "CONSTANT")
+        elif self.padding.lower() == 'reflect':
+            return tf.pad(x, padding, "REFLECT")
+        elif self.padding.lower() == 'symmetric':
+            return tf.pad(x, padding, "SYMMETRIC")
+    
+    def n_window_positions(self, samples):
+        if self.window_size is None:
+            return 1
+        return (samples - self.window_size) // self.stride + 1
+    
+    def slice_op(self, x, idx):
+        nsamps, c = x.shape
+        start = idx * self.stride
+        x = tf.slice(x,
+                     [start, 0],
+                     [self.window_size, tf.shape(x)[-1]])
+        x = tf.expand_dims(x, axis=0)
+        ret = self.payload(x)
+        return ret[0]
+    
+    def moving_window(self, x, idx):
+        batch_size, nsamps, nchannels = x.shape
+        nslices = self.n_window_positions(nsamps)
+        winfunc = partial(self.slice_op, x[idx])
+        ret = tf.map_fn(winfunc,
+                        tf.range(nslices),
+                        fn_output_signature=self.dtype)
+        return ret
+    
+    def call(self, x):
+        x = self.apply_padding(x)
+        batch_size, nsamps, nchannels = x.shape
+        if batch_size is None:
+            # Only used to return correct shape in model summary
+            out_shape = self.compute_output_shape(x.shape)
+            if self.squeeze:
+                out_shape = [out_shape[0],
+                             out_shape[1] * out_shape[2]] + out_shape[3:]
+            output = x[:, 0, 0]
+            padding = [[0, 0]]
+            for sh in out_shape[1:]:
+                output = tf.expand_dims(output, axis=-1)
+                padding.append([0, sh - 1])
+            
+            padding = tf.constant(padding)
+            output = tf.pad(output, padding)
+            return output
+        
+        winfunc = partial(self.moving_window, x)
+        ret = tf.map_fn(winfunc,
+                        tf.range(batch_size),
+                        fn_output_signature=self.dtype)
+        if not self.squeeze:
+            return ret
+        tmp = ret.shape
+        return tf.reshape(ret, [tmp[0], tmp[1] * tmp[2]] + tmp[3:])
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update({"model": keras.utils.serialize_keras_object(self.payload),  # noqa: E501
+                       "stride": self.stride,
+                       "padding": self.padding,
+                       "squeeze": self.squeeze})
+        return config
+    
+    @classmethod
+    def from_config(cls, config, custom_objects=None):
+        config = copy.deepcopy(config)
+        model = keras.layers.deserialize(config.pop('model'),
+                                         custom_objects=custom_objects)
+        return cls(model, **config)
+    
+    def compute_output_shape(self, input_shape):
+        batch_size, nsamples, nchannels = input_shape
+        ret = [batch_size,
+               self.n_window_positions(nsamples)]
+        ret += self.payload.output_shape[1:]
+        return ret

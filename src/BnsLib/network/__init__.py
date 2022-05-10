@@ -1,4 +1,5 @@
-from .layers import BaseInception1D, InputNormalization, FConv1D, WConv1D
+from .layers import BaseInception1D, InputNormalization, FConv1D, WConv1D,\
+                    NetConvolve
 from .trainer import Trainer, Evaluator
 from .cvae import GaussianMixture, MultiDistribution, MultiVariateNormal,\
                   CVAE
@@ -28,4 +29,5 @@ __all__ = ['BaseInception1D', 'InputNormalization', 'FConv1D', 'WConv1D',
            'FileGenerator', 'H5pyHandler', 'CachedH5pyHandler',
            'LoadDataHandler', 'GroupedIndexFileGenerator',
            'PrefetchedFileGenerator', 'PrefetchedFileGeneratorMP',
-           'ScaledPrefetchedGeneratorMP', 'TimeSeriesGenerator']
+           'ScaledPrefetchedGeneratorMP', 'TimeSeriesGenerator',
+           'NetConvolve']
